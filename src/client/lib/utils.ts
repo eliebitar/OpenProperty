@@ -36,10 +36,16 @@ export function formatDate(iso: string | null | undefined, opts?: Intl.DateTimeF
   return d.toLocaleDateString(undefined, opts ?? { year: "numeric", month: "short", day: "numeric" });
 }
 
-/** Format a number as currency. Uses USD by default. */
-export function formatMoney(n: number | null | undefined, currency = "USD"): string {
+/** Format a number as currency. Uses EUR by default. */
+export function formatMoney(n: number | null | undefined, currency = "EUR"): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+  const hasCents = n % 1 !== 0;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(n);
 }
 
 /** YYYY-MM-DD for a given Date in local time. */

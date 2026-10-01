@@ -279,7 +279,7 @@ function PolicyTab() {
         default_rent_due_day: Math.min(31, Math.max(1, parseInt(dueDay, 10) || 1)),
         late_fee_amount: parseFloat(lateFee) || 0,
         late_fee_grace_days: Math.max(0, parseInt(grace, 10) || 0),
-        currency: currency.trim().toUpperCase() || "USD",
+        currency: currency.trim().toUpperCase() || "EUR",
       });
     } catch (err) {
       app.setError((err as Error).message);
@@ -309,7 +309,7 @@ function PolicyTab() {
         </div>
         <div>
           <Label htmlFor="s-cur">Currency</Label>
-          <Input id="s-cur" value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="USD" />
+          <Input id="s-cur" value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="EUR" />
         </div>
       </div>
       <div className="mt-4">

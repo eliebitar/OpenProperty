@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Mail, Pencil, Phone, User } from "lucide-react";
+import { ArrowLeft, Building2, Mail, Pencil, Phone, User } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { formatDate, formatMoney } from "@/lib/utils";
@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TenantDialog } from "./tenant-dialog";
+import { LeaseDialog } from "@/components/leases/lease-dialog";
 import type { Lease, Tenant } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
@@ -16,6 +17,7 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
   const [leases, setLeases] = useState<Lease[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [leaseDialogOpen, setLeaseDialogOpen] = useState(false);
 
   async function load() {
     try {
@@ -79,10 +81,31 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
               </div>
             </div>
           </div>
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            <Pencil className="mr-1 h-4 w-4" /> Edit
-          </Button>
+          <div className="flex gap-2">
+            {!activeLease && (
+              <Button onClick={() => setLeaseDialogOpen(true)} className="gap-1.5">
+                <Building2 className="h-4 w-4" /> Assign to unit
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil className="mr-1 h-4 w-4" /> Edit
+            </Button>
+          </div>
         </header>
+
+        {!activeLease && (
+          <Card className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-dashed bg-muted/20">
+            <div>
+              <p className="text-sm font-semibold">No active unit assignment</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Assign this tenant to a property unit to create an active lease.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setLeaseDialogOpen(true)} className="gap-1.5 shrink-0">
+              <Building2 className="h-4 w-4" /> Assign to unit
+            </Button>
+          </Card>
+        )}
 
         {activeLease && (
           <Card className="p-5">
@@ -143,6 +166,12 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
         open={editing}
         onOpenChange={(o) => { setEditing(o); if (!o) load(); }}
         tenant={tenant}
+      />
+      <LeaseDialog
+        open={leaseDialogOpen}
+        onOpenChange={(o) => { setLeaseDialogOpen(o); if (!o) load(); }}
+        defaults={{ primary_tenant_id: tenant.id }}
+        onSaved={load}
       />
     </PageShell>
   );

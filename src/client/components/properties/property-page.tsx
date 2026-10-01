@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench, User, UserPlus } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
@@ -9,7 +9,8 @@ import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
 import { WorkOrderDialog } from "../maintenance/work-order-dialog";
-import type { Property, Unit, WorkOrder } from "@/types";
+import { OperatingCostsSection } from "./operating-costs-section";
+import type { Property, Unit, WorkOrder, OperatingCostsSummary } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -32,6 +33,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   const [property, setProperty] = useState<Property | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [operatingSummary, setOperatingSummary] = useState<OperatingCostsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingProperty, setEditingProperty] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | undefined>(undefined);
@@ -41,14 +43,19 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   async function load() {
     try {
       setLoading(true);
-      const [{ property: p }, ulist, wlist] = await Promise.all([
+      const [{ property: p }, ulist, wlist, opData] = await Promise.all([
         api<{ property: Property }>("GET", `/api/properties/${id}`),
         app.listUnits(id),
         app.listWorkOrders({ property_id: id }),
+        api<{ summary: OperatingCostsSummary }>(
+          "GET",
+          `/api/properties/${id}/operating-costs-summary?year=${new Date().getFullYear()}`
+        ).catch(() => ({ summary: null })),
       ]);
       setProperty(p);
       setUnits(ulist);
       setWorkOrders(wlist);
+      setOperatingSummary(opData?.summary ?? null);
     } catch (err) {
       app.setError((err as Error).message);
     } finally {
@@ -141,30 +148,136 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
             </Card>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {units.map((u) => (
-                <Card key={u.id} className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted" onClick={() => { setEditingUnit(u); setUnitDialogOpen(true); }}>
-                  <div className="flex items-start justify-between">
+              {units.map((u) => {
+                const unitSummary = operatingSummary?.units.find((ou) => ou.unit_id === u.id);
+                const coldRent = u.active_rent ?? u.market_rent ?? 0;
+                const monthlyOpAdvance = ((u.active_operating_advance ?? 0) + (u.active_heating_advance ?? 0)) || (u.monthly_operating_cost ?? 0);
+                const warmRent = coldRent + monthlyOpAdvance;
+                const currentYear = new Date().getFullYear();
+
+                return (
+                  <Card
+                    key={u.id}
+                    className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted/40 flex flex-col justify-between"
+                    onClick={() => {
+                      setEditingUnit(u);
+                      setUnitDialogOpen(true);
+                    }}
+                  >
                     <div>
-                      <h3 className="font-semibold">{u.name}</h3>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
-                      </p>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="font-semibold text-base">{u.name}</h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} m²` : ""}
+                          </p>
+                        </div>
+                        <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
+                          {u.status}
+                        </span>
+                      </div>
+
+                      {/* Monthly Rent Breakdown */}
+                      <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-md border bg-muted/20 p-2 text-xs">
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block font-medium">Cold Rent</span>
+                          <span className="font-mono font-semibold tabular-nums text-foreground">
+                            {formatMoney(coldRent, app.settings.currency)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block font-medium">Nebenkosten</span>
+                          <span className="font-mono font-semibold tabular-nums text-foreground">
+                            +{formatMoney(monthlyOpAdvance, app.settings.currency)}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-muted-foreground block font-medium">Warm Rent</span>
+                          <span className="font-mono font-bold tabular-nums text-primary">
+                            {formatMoney(warmRent, app.settings.currency)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Yearly Operating Cost Settlement Comparison */}
+                      {unitSummary && (
+                        <div className="mt-2.5 rounded-md border bg-card p-2 text-xs space-y-1.5 shadow-sm">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span className="font-semibold text-foreground">Yearly Settlement ({currentYear})</span>
+                            <span className="font-mono">{unitSummary.sqft} m² ({unitSummary.sqft_share_pct}%)</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1 py-1 border-y border-dashed text-[11px]">
+                            <div>
+                              <span className="text-muted-foreground text-[10px] block">Paid Already:</span>
+                              <span className="font-mono font-semibold text-foreground">
+                                {formatMoney(unitSummary.annual_advance, app.settings.currency)}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-muted-foreground text-[10px] block">Actual Cost:</span>
+                              <span className="font-mono font-semibold text-foreground">
+                                {formatMoney(unitSummary.allocated_cost, app.settings.currency)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-0.5">
+                            <span className="text-[10px] uppercase font-semibold text-muted-foreground">
+                              {unitSummary.is_vacant
+                                ? "Vacancy"
+                                : unitSummary.balance < 0
+                                ? "Refund"
+                                : unitSummary.balance > 0
+                                ? "Balance Due"
+                                : "Status"}
+                            </span>
+                            {unitSummary.is_vacant ? (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono">
+                                Owner: {formatMoney(unitSummary.allocated_cost, app.settings.currency)}
+                              </Badge>
+                            ) : unitSummary.balance < 0 ? (
+                              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 text-[10px] font-mono font-semibold">
+                                Gets back: {formatMoney(Math.abs(unitSummary.balance), app.settings.currency)}
+                              </Badge>
+                            ) : unitSummary.balance > 0 ? (
+                              <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[10px] font-mono font-semibold">
+                                Needs to pay: {formatMoney(unitSummary.balance, app.settings.currency)}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] font-mono">
+                                Balanced (€0.00)
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
-                      {u.status}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-end justify-between border-t pt-3">
-                    <div>
-                      <div className="stat-label">Market rent</div>
-                      <div className="text-sm font-semibold tabular-nums">{formatMoney(u.market_rent, app.settings.currency)}</div>
+
+                    {/* Tenant Footer Row */}
+                    <div className="mt-3 flex items-center justify-between border-t pt-2.5 text-xs">
+                      <span className="text-muted-foreground text-[11px]">Tenant:</span>
+                      {u.active_tenant_name ? (
+                        <span className="font-medium text-foreground flex items-center gap-1">
+                          <User className="h-3 w-3 text-muted-foreground" />
+                          {u.active_tenant_name}
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[11px] px-2 gap-1 text-primary hover:text-primary hover:bg-primary/5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingUnit(u);
+                            setUnitDialogOpen(true);
+                          }}
+                        >
+                          <UserPlus className="h-3 w-3" /> Assign tenant
+                        </Button>
+                      )}
                     </div>
-                    {u.active_tenant_name && (
-                      <div className="text-right text-xs text-muted-foreground">{u.active_tenant_name}</div>
-                    )}
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                );
+              })}
             </div>
           )}
         </section>
@@ -200,6 +313,8 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
             </Card>
           )}
         </section>
+
+        <OperatingCostsSection propertyId={property.id} />
 
       <PropertyDialog
         open={editingProperty}

@@ -28,10 +28,12 @@ CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   name TEXT NOT NULL,                          -- e.g. 'Unit 1A', '308', 'Main house'
+  type TEXT NOT NULL DEFAULT 'residential',    -- 'residential' | 'commercial'
   bedrooms REAL NOT NULL DEFAULT 1,            -- studio = 0, allows half-beds (rare)
   bathrooms REAL NOT NULL DEFAULT 1,           -- allows half-baths (1.5)
   sqft INTEGER,
   market_rent REAL NOT NULL DEFAULT 0,
+  monthly_operating_cost REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'vacant',       -- 'vacant' | 'occupied' | 'turnover' | 'unavailable'
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -65,6 +67,8 @@ CREATE TABLE IF NOT EXISTS leases (
   start_date TEXT NOT NULL,                    -- 'YYYY-MM-DD'
   end_date TEXT NOT NULL,
   monthly_rent REAL NOT NULL DEFAULT 0,
+  operating_cost_advance REAL NOT NULL DEFAULT 0,
+  heating_cost_advance REAL NOT NULL DEFAULT 0,
   deposit REAL NOT NULL DEFAULT 0,
   rent_due_day INTEGER NOT NULL DEFAULT 1,
   late_fee REAL NOT NULL DEFAULT 0,
@@ -168,3 +172,29 @@ CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 
 -- Demo data is seeded by the app on first read (ensureSeeded in
 -- src/server/index.ts), never here: this file is applied as DDL only.
+
+-- ── Operating Costs (Nebenkosten) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS operating_costs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  cost_type TEXT NOT NULL,                     -- e.g. 'water', 'tax', 'garbage', 'insurance'
+  amount REAL NOT NULL DEFAULT 0,
+  is_commercial_only BOOLEAN NOT NULL DEFAULT 0, -- Vorwegabzug flag
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_operating_costs_prop_year ON operating_costs(property_id, year);
+
+CREATE TABLE IF NOT EXISTS nebenkosten_statements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lease_id INTEGER NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  total_actual_costs REAL NOT NULL DEFAULT 0,
+  total_advance_paid REAL NOT NULL DEFAULT 0,
+  balance REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_nk_statements_lease ON nebenkosten_statements(lease_id);

@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   default_rent_due_day: "1",
   late_fee_amount: "50",
   late_fee_grace_days: "5",
-  currency: "USD",
+  currency: "EUR",
   keycloak_enabled: "false",
   keycloak_url: "http://localhost:8080",
   keycloak_realm: "openproperty",
@@ -62,6 +62,12 @@ async function ensureSeeded(): Promise<void> {
   try {
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
       await run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", [key, value]);
+    }
+    await run("UPDATE settings SET value = 'EUR' WHERE key = 'currency' AND value = 'USD'");
+    try {
+      await run("ALTER TABLE units ADD COLUMN monthly_operating_cost REAL NOT NULL DEFAULT 0");
+    } catch {
+      // Column already exists
     }
 
     const props = await get<{ n: number }>("SELECT COUNT(*) AS n FROM properties");
@@ -201,10 +207,12 @@ app.delete("/api/properties/:id", async (c) => {
 const UnitInput = z.object({
   property_id: z.number().int(),
   name: z.string().min(1),
+  type: z.enum(["residential", "commercial"]).optional(),
   bedrooms: z.number().min(0).optional(),
   bathrooms: z.number().min(0).optional(),
   sqft: z.number().int().optional().nullable(),
   market_rent: z.number().min(0).optional(),
+  monthly_operating_cost: z.number().min(0).optional(),
   status: z.enum(["vacant", "occupied", "turnover", "unavailable"]).optional(),
   notes: z.string().optional().nullable(),
 });
@@ -216,7 +224,11 @@ const UNIT_SELECT = `
     p.address as property_address,
     p.city as property_city,
     (SELECT l.id FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_lease_id,
-    (SELECT t.first_name || ' ' || t.last_name FROM leases l LEFT JOIN tenants t ON t.id = l.primary_tenant_id WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_name
+    (SELECT l.primary_tenant_id FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_id,
+    (SELECT t.first_name || ' ' || t.last_name FROM leases l LEFT JOIN tenants t ON t.id = l.primary_tenant_id WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_name,
+    (SELECT l.monthly_rent FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_rent,
+    (SELECT l.operating_cost_advance FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_operating_advance,
+    (SELECT l.heating_cost_advance FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_heating_advance
   FROM units u
   LEFT JOIN properties p ON p.id = u.property_id
 `;
@@ -246,9 +258,9 @@ app.post("/api/units", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO units (property_id, name, bedrooms, bathrooms, sqft, market_rent, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.property_id, d.name, d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null, d.market_rent ?? 0, d.status ?? "vacant", d.notes ?? null],
+    `INSERT INTO units (property_id, name, type, bedrooms, bathrooms, sqft, market_rent, monthly_operating_cost, status, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [d.property_id, d.name, d.type ?? "residential", d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null, d.market_rent ?? 0, d.monthly_operating_cost ?? 0, d.status ?? "vacant", d.notes ?? null],
   );
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [result.lastInsertRowid]);
   return c.json({ unit: row }, 201);
@@ -264,6 +276,18 @@ app.put("/api/units/:id", async (c) => {
   params.push(id);
   const r = await run(`UPDATE units SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
+  if (parsed.data.monthly_operating_cost !== undefined) {
+    await run(
+      "UPDATE leases SET operating_cost_advance = ? WHERE unit_id = ? AND status = 'active'",
+      [parsed.data.monthly_operating_cost, id],
+    );
+  }
+  if (parsed.data.market_rent !== undefined) {
+    await run(
+      "UPDATE leases SET monthly_rent = ? WHERE unit_id = ? AND status = 'active'",
+      [parsed.data.market_rent, id],
+    );
+  }
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [id]);
   return c.json({ unit: row });
 });
@@ -274,6 +298,76 @@ app.delete("/api/units/:id", async (c) => {
   const r = await run("DELETE FROM units WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+app.post("/api/units/:id/assign-tenant", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid unit ID" }, 400);
+
+  const unit = await get<{ id: number; market_rent: number; monthly_operating_cost: number }>(
+    "SELECT id, market_rent, monthly_operating_cost FROM units WHERE id = ?",
+    [id],
+  );
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const body = await c.req.json().catch(() => ({})) as {
+    tenant_id: number;
+    start_date?: string;
+    end_date?: string;
+    monthly_rent?: number;
+    operating_cost_advance?: number;
+    heating_cost_advance?: number;
+    deposit?: number;
+    notes?: string | null;
+  };
+
+  if (!body.tenant_id) return c.json({ error: "tenant_id is required" }, 400);
+
+  const tenant = await get<{ id: number }>("SELECT id FROM tenants WHERE id = ?", [body.tenant_id]);
+  if (!tenant) return c.json({ error: "Tenant not found" }, 404);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const oneYearFromNow = new Date();
+  oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+  const nextYear = oneYearFromNow.toISOString().slice(0, 10);
+
+  const startDate = body.start_date || today;
+  const endDate = body.end_date || nextYear;
+  const rent = body.monthly_rent ?? unit.market_rent ?? 0;
+  const opAdvance = body.operating_cost_advance ?? unit.monthly_operating_cost ?? 0;
+  const heatAdvance = body.heating_cost_advance ?? 0;
+  const deposit = body.deposit ?? 0;
+
+  // End any previously active leases for this unit
+  await run("UPDATE leases SET status = 'ended' WHERE unit_id = ? AND status = 'active'", [id]);
+
+  // Insert new active lease
+  const res = await run(
+    `INSERT INTO leases (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, operating_cost_advance, heating_cost_advance, deposit, status, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    [id, body.tenant_id, startDate, endDate, rent, opAdvance, heatAdvance, deposit, body.notes ?? null],
+  );
+
+  // Mark unit as occupied
+  await run("UPDATE units SET status = 'occupied' WHERE id = ?", [id]);
+
+  const updatedUnit = await get(`${UNIT_SELECT} WHERE u.id = ?`, [id]);
+  const createdLease = await get(`${LEASE_SELECT} WHERE l.id = ?`, [res.lastInsertRowid]);
+
+  return c.json({ unit: updatedUnit, lease: createdLease }, 201);
+});
+
+app.post("/api/units/:id/unassign-tenant", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid unit ID" }, 400);
+
+  // End all active leases for this unit
+  await run("UPDATE leases SET status = 'ended' WHERE unit_id = ? AND status = 'active'", [id]);
+  // Mark unit as vacant
+  await run("UPDATE units SET status = 'vacant' WHERE id = ?", [id]);
+
+  const updatedUnit = await get(`${UNIT_SELECT} WHERE u.id = ?`, [id]);
+  return c.json({ unit: updatedUnit });
 });
 
 // ── Tenants ────────────────────────────────────────────────────────
@@ -373,6 +467,8 @@ const LeaseInput = z.object({
   start_date: z.string(),
   end_date: z.string(),
   monthly_rent: z.number().min(0).optional(),
+  operating_cost_advance: z.number().min(0).optional(),
+  heating_cost_advance: z.number().min(0).optional(),
   deposit: z.number().min(0).optional(),
   rent_due_day: z.number().int().min(1).max(31).optional(),
   late_fee: z.number().min(0).optional(),
@@ -419,9 +515,9 @@ app.post("/api/leases", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO leases (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, deposit, rent_due_day, late_fee, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.unit_id, d.primary_tenant_id ?? null, d.start_date, d.end_date, d.monthly_rent ?? 0, d.deposit ?? 0, d.rent_due_day ?? 1, d.late_fee ?? 0, d.status ?? "active", d.notes ?? null],
+    `INSERT INTO leases (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, operating_cost_advance, heating_cost_advance, deposit, rent_due_day, late_fee, status, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [d.unit_id, d.primary_tenant_id ?? null, d.start_date, d.end_date, d.monthly_rent ?? 0, d.operating_cost_advance ?? 0, d.heating_cost_advance ?? 0, d.deposit ?? 0, d.rent_due_day ?? 1, d.late_fee ?? 0, d.status ?? "active", d.notes ?? null],
   );
   // Mark the unit as occupied if the new lease is active.
   if ((d.status ?? "active") === "active") {
@@ -441,6 +537,20 @@ app.put("/api/leases/:id", async (c) => {
   params.push(id);
   const r = await run(`UPDATE leases SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
+
+  // Sync unit occupancy status
+  const currentLease = await get<{ unit_id: number; status: string }>("SELECT unit_id, status FROM leases WHERE id = ?", [id]);
+  if (currentLease) {
+    if (currentLease.status === "active") {
+      await run("UPDATE units SET status = 'occupied' WHERE id = ?", [currentLease.unit_id]);
+    } else {
+      const activeCount = await get<{ n: number }>("SELECT COUNT(*) AS n FROM leases WHERE unit_id = ? AND status = 'active'", [currentLease.unit_id]);
+      if ((activeCount?.n ?? 0) === 0) {
+        await run("UPDATE units SET status = 'vacant' WHERE id = ?", [currentLease.unit_id]);
+      }
+    }
+  }
+
   const row = await get(`${LEASE_SELECT} WHERE l.id = ?`, [id]);
   return c.json({ lease: row });
 });
@@ -448,8 +558,17 @@ app.put("/api/leases/:id", async (c) => {
 app.delete("/api/leases/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const lease = await get<{ unit_id: number }>("SELECT unit_id FROM leases WHERE id = ?", [id]);
   const r = await run("DELETE FROM leases WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
+
+  if (lease) {
+    const activeCount = await get<{ n: number }>("SELECT COUNT(*) AS n FROM leases WHERE unit_id = ? AND status = 'active'", [lease.unit_id]);
+    if ((activeCount?.n ?? 0) === 0) {
+      await run("UPDATE units SET status = 'vacant' WHERE id = ?", [lease.unit_id]);
+    }
+  }
+
   return c.json({ ok: true });
 });
 
@@ -510,8 +629,8 @@ app.post("/api/rent-charges/generate", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { period?: string };
   const period = body.period;
   if (!period || !/^\d{4}-\d{2}$/.test(period)) return c.json({ error: "period (YYYY-MM) required" }, 400);
-  const leases = await query<{ id: number; monthly_rent: number; rent_due_day: number; start_date: string; end_date: string }>(
-    "SELECT id, monthly_rent, rent_due_day, start_date, end_date FROM leases WHERE status = 'active'",
+  const leases = await query<{ id: number; monthly_rent: number; operating_cost_advance: number; heating_cost_advance: number; rent_due_day: number; start_date: string; end_date: string }>(
+    "SELECT id, monthly_rent, operating_cost_advance, heating_cost_advance, rent_due_day, start_date, end_date FROM leases WHERE status = 'active'",
   );
   let created = 0;
   for (const l of leases) {
@@ -520,10 +639,11 @@ app.post("/api/rent-charges/generate", async (c) => {
     if (l.end_date < periodStart) continue;
     const day = String(Math.min(28, Math.max(1, l.rent_due_day))).padStart(2, "0");
     const dueDate = `${period}-${day}`;
+    const totalCharge = (l.monthly_rent || 0) + (l.operating_cost_advance || 0) + (l.heating_cost_advance || 0);
     const r = await run(
       `INSERT INTO rent_charges (lease_id, period, due_date, amount) VALUES (?, ?, ?, ?)
          ON CONFLICT(lease_id, period) DO NOTHING`,
-      [l.id, period, dueDate, l.monthly_rent],
+      [l.id, period, dueDate, totalCharge],
     );
     if (r.changes) created++;
   }
@@ -1014,6 +1134,333 @@ app.post("/api/auth/test-connection", async (c) => {
       500,
     );
   }
+});
+
+// ── Operating Costs ────────────────────────────────────────────────
+const OperatingCostInput = z.object({
+  property_id: z.number().int(),
+  year: z.number().int(),
+  cost_type: z.string().min(1),
+  amount: z.number().min(0),
+  is_commercial_only: z.boolean().optional(),
+  notes: z.string().optional().nullable(),
+});
+
+app.get("/api/operating-costs", async (c) => {
+  const propertyId = intParam(c.req.query("property_id"));
+  const year = intParam(c.req.query("year"));
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (propertyId) { where.push("property_id = ?"); params.push(propertyId); }
+  if (year) { where.push("year = ?"); params.push(year); }
+  const sql = `SELECT * FROM operating_costs ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY year DESC, cost_type ASC`;
+  const rows = await query(sql, params).catch(() => []);
+  return c.json({ operating_costs: rows });
+});
+
+app.post("/api/operating-costs", async (c) => {
+  const parsed = await parseJson(c, OperatingCostInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+  const result = await run(
+    `INSERT INTO operating_costs (property_id, year, cost_type, amount, is_commercial_only, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+    [d.property_id, d.year, d.cost_type, d.amount, d.is_commercial_only ? 1 : 0, d.notes ?? null],
+  );
+  const row = await get(`SELECT * FROM operating_costs WHERE id = ?`, [result.lastInsertRowid]);
+  return c.json({ operating_cost: row }, 201);
+});
+
+app.delete("/api/operating-costs/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const r = await run("DELETE FROM operating_costs WHERE id = ?", [id]);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+});
+
+// Batch create operating costs
+app.post("/api/operating-costs/batch", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    property_id: number;
+    year: number;
+    costs: Array<{ cost_type: string; amount: number; is_commercial_only?: boolean; notes?: string | null }>;
+  };
+  if (!body.property_id || !body.year || !Array.isArray(body.costs)) {
+    return c.json({ error: "Invalid payload" }, 400);
+  }
+  let added = 0;
+  for (const item of body.costs) {
+    if (!item.cost_type || typeof item.amount !== "number" || item.amount <= 0) continue;
+    await run(
+      `INSERT INTO operating_costs (property_id, year, cost_type, amount, is_commercial_only, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+      [body.property_id, body.year, item.cost_type, item.amount, item.is_commercial_only ? 1 : 0, item.notes ?? null],
+    );
+    added++;
+  }
+  return c.json({ added });
+});
+
+// Detailed property operating costs summary & per-unit space calculation
+app.get("/api/properties/:id/operating-costs-summary", async (c) => {
+  const propertyId = intParam(c.req.param("id"));
+  const year = intParam(c.req.query("year")) || new Date().getFullYear();
+  if (!propertyId) return c.json({ error: "Invalid property ID" }, 400);
+
+  const property = await get<{ id: number; name: string; type: string }>(
+    "SELECT id, name, type FROM properties WHERE id = ?",
+    [propertyId],
+  );
+  if (!property) return c.json({ error: "Property not found" }, 404);
+
+  // 1. Costs for this property and year
+  const costs = await query<{ id: number; property_id: number; year: number; cost_type: string; amount: number; is_commercial_only: number; notes: string | null; created_at: string }>(
+    "SELECT * FROM operating_costs WHERE property_id = ? AND year = ? ORDER BY cost_type ASC",
+    [propertyId, year],
+  );
+
+  let totalPropertyCosts = 0;
+  let sharedCosts = 0;
+  let commercialOnlyCosts = 0;
+  for (const cost of costs) {
+    totalPropertyCosts += cost.amount;
+    if (cost.is_commercial_only) {
+      commercialOnlyCosts += cost.amount;
+    } else {
+      sharedCosts += cost.amount;
+    }
+  }
+
+  // 2. Units in property
+  const units = await query<{ id: number; name: string; type: string; sqft: number | null; status: string; monthly_operating_cost: number }>(
+    "SELECT id, name, type, sqft, status, monthly_operating_cost FROM units WHERE property_id = ? ORDER BY name ASC",
+    [propertyId],
+  );
+
+  let totalSqft = 0;
+  let totalResidentialSqft = 0;
+  let totalCommercialSqft = 0;
+  let commercialUnitsCount = 0;
+  for (const u of units) {
+    const s = u.sqft || 0;
+    totalSqft += s;
+    if (u.type === "commercial") {
+      totalCommercialSqft += s;
+      commercialUnitsCount++;
+    } else {
+      totalResidentialSqft += s;
+    }
+  }
+
+  const costPerSqft = totalSqft > 0 ? (totalPropertyCosts / totalSqft) : 0;
+  const sharedCostPerSqft = totalSqft > 0 ? (sharedCosts / totalSqft) : 0;
+
+  // 3. Active leases covering this year
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const leases = await query<{
+    id: number;
+    unit_id: number;
+    operating_cost_advance: number;
+    heating_cost_advance: number;
+    start_date: string;
+    end_date: string;
+    first_name: string | null;
+    last_name: string | null;
+  }>(
+    `SELECT l.id, l.unit_id, l.operating_cost_advance, l.heating_cost_advance, l.start_date, l.end_date,
+            t.first_name, t.last_name
+     FROM leases l
+     JOIN units u ON u.id = l.unit_id
+     LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+     WHERE u.property_id = ? AND (l.start_date <= ? AND l.end_date >= ?) AND l.status != 'cancelled'
+     ORDER BY l.id DESC`,
+    [propertyId, yearEnd, yearStart],
+  );
+
+  // 4. Existing statements
+  const statements = await query<{ id: number; lease_id: number; year: number; total_actual_costs: number; total_advance_paid: number; balance: number }>(
+    `SELECT s.* FROM nebenkosten_statements s
+     JOIN leases l ON l.id = s.lease_id
+     JOIN units u ON u.id = l.unit_id
+     WHERE u.property_id = ? AND s.year = ?`,
+    [propertyId, year],
+  );
+
+  // 5. Per-unit breakdown calculation based on space
+  const unitsBreakdown = units.map((u) => {
+    const s = u.sqft || 0;
+    const isCommercial = u.type === "commercial";
+    const sqftSharePct = totalSqft > 0 ? (s / totalSqft) * 100 : 0;
+
+    const costItems = costs.map((cost) => {
+      let unitShare = 0;
+      let key = "";
+      if (cost.is_commercial_only) {
+        if (isCommercial) {
+          if (totalCommercialSqft > 0) {
+            unitShare = cost.amount * (s / totalCommercialSqft);
+            key = `${s} m² / ${totalCommercialSqft} m² (Gewerbe)`;
+          } else {
+            unitShare = commercialUnitsCount > 0 ? cost.amount / commercialUnitsCount : 0;
+            key = "Equal split (Gewerbe)";
+          }
+        } else {
+          unitShare = 0;
+          key = "Vorwegabzug (nur Gewerbe)";
+        }
+      } else {
+        if (totalSqft > 0) {
+          unitShare = cost.amount * (s / totalSqft);
+          key = `${s} m² / ${totalSqft} m² (Gesamt)`;
+        } else {
+          unitShare = units.length > 0 ? cost.amount / units.length : 0;
+          key = "Equal split";
+        }
+      }
+      return {
+        cost_id: cost.id,
+        cost_type: cost.cost_type,
+        total_property_amount: cost.amount,
+        is_commercial_only: !!cost.is_commercial_only,
+        allocation_key: key,
+        unit_share_amount: Math.round(unitShare * 100) / 100,
+      };
+    });
+
+    const allocatedCost = Math.round(costItems.reduce((acc, ci) => acc + ci.unit_share_amount, 0) * 100) / 100;
+
+    const lease = leases.find((l) => l.unit_id === u.id);
+    const statement = lease ? statements.find((st) => st.lease_id === lease.id) : null;
+
+    const leaseAdvance = lease ? (lease.operating_cost_advance || 0) + (lease.heating_cost_advance || 0) : 0;
+    const monthlyAdvance = leaseAdvance > 0 ? leaseAdvance : (lease ? (u.monthly_operating_cost || 0) : 0);
+    const annualAdvance = Math.round(monthlyAdvance * 12 * 100) / 100;
+    const balance = lease ? Math.round((allocatedCost - annualAdvance) * 100) / 100 : allocatedCost;
+
+    return {
+      unit_id: u.id,
+      unit_name: u.name,
+      unit_type: u.type as "residential" | "commercial",
+      sqft: s,
+      sqft_share_pct: Math.round(sqftSharePct * 10) / 10,
+      allocated_cost: allocatedCost,
+      lease_id: lease ? lease.id : null,
+      tenant_name: lease ? `${lease.first_name || ""} ${lease.last_name || ""}`.trim() || "Tenant" : null,
+      operating_cost_advance: lease?.operating_cost_advance || 0,
+      heating_cost_advance: lease?.heating_cost_advance || 0,
+      monthly_advance: monthlyAdvance,
+      annual_advance: annualAdvance,
+      balance,
+      is_vacant: !lease,
+      cost_items: costItems,
+      statement_id: statement?.id ?? null,
+    };
+  });
+
+  return c.json({
+    summary: {
+      property_id: property.id,
+      property_name: property.name,
+      year,
+      total_property_costs: Math.round(totalPropertyCosts * 100) / 100,
+      shared_costs: Math.round(sharedCosts * 100) / 100,
+      commercial_only_costs: Math.round(commercialOnlyCosts * 100) / 100,
+      total_sqft: totalSqft,
+      total_residential_sqft: totalResidentialSqft,
+      total_commercial_sqft: totalCommercialSqft,
+      cost_per_sqft: Math.round(costPerSqft * 100) / 100,
+      shared_cost_per_sqft: Math.round(sharedCostPerSqft * 100) / 100,
+      costs: costs.map((c) => ({ ...c, is_commercial_only: !!c.is_commercial_only })),
+      units: unitsBreakdown,
+    },
+  });
+});
+
+// Generate / Save Statement (space-based distribution + commercial Vorwegabzug)
+app.post("/api/nebenkosten-statements/generate", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { property_id?: number; year?: number };
+  if (!body.property_id || !body.year) return c.json({ error: "property_id and year required" }, 400);
+  const { property_id, year } = body;
+
+  // 1. Get all costs
+  const costs = await query<{ amount: number; is_commercial_only: number }>(
+    "SELECT amount, is_commercial_only FROM operating_costs WHERE property_id = ? AND year = ?",
+    [property_id, year],
+  );
+  let sharedCosts = 0;
+  let commercialOnlyCosts = 0;
+  for (const cost of costs) {
+    if (cost.is_commercial_only) {
+      commercialOnlyCosts += cost.amount;
+    } else {
+      sharedCosts += cost.amount;
+    }
+  }
+
+  // 2. Get units and their sqft
+  const units = await query<{ id: number; type: string; sqft: number | null; monthly_operating_cost: number }>(
+    "SELECT id, type, sqft, monthly_operating_cost FROM units WHERE property_id = ?",
+    [property_id],
+  );
+  let totalSqft = 0;
+  let totalCommercialSqft = 0;
+  let commUnitsCount = 0;
+  for (const u of units) {
+    const s = u.sqft || 0;
+    totalSqft += s;
+    if (u.type === "commercial") {
+      totalCommercialSqft += s;
+      commUnitsCount++;
+    }
+  }
+
+  // 3. Process active leases for this year
+  const leases = await query<{ id: number; unit_id: number; operating_cost_advance: number; heating_cost_advance: number }>(
+    `SELECT l.id, l.unit_id, l.operating_cost_advance, l.heating_cost_advance 
+     FROM leases l JOIN units u ON u.id = l.unit_id 
+     WHERE u.property_id = ? AND (l.start_date <= ? AND l.end_date >= ?) AND l.status != 'cancelled'`,
+    [property_id, `${year}-12-31`, `${year}-01-01`],
+  );
+
+  let generated = 0;
+  for (const l of leases) {
+    const u = units.find((x) => x.id === l.unit_id);
+    const s = u?.sqft || 0;
+    if (!u || !s || !totalSqft) continue;
+    
+    // Exact space-based share
+    let allocatedCost = sharedCosts * (s / totalSqft);
+    if (u.type === "commercial") {
+      if (totalCommercialSqft > 0) {
+        allocatedCost += commercialOnlyCosts * (s / totalCommercialSqft);
+      } else if (commUnitsCount > 0) {
+        allocatedCost += commercialOnlyCosts / commUnitsCount;
+      }
+    }
+    allocatedCost = Math.round(allocatedCost * 100) / 100;
+    
+    const leaseAdv = (l.operating_cost_advance || 0) + (l.heating_cost_advance || 0);
+    const monthlyAdv = leaseAdv > 0 ? leaseAdv : (u?.monthly_operating_cost || 0);
+    const annualAdvance = Math.round(monthlyAdv * 12 * 100) / 100;
+    const balance = Math.round((allocatedCost - annualAdvance) * 100) / 100;
+
+    // Idempotent: delete existing statement for this lease and year
+    await run("DELETE FROM nebenkosten_statements WHERE lease_id = ? AND year = ?", [l.id, year]);
+
+    const r = await run(
+      `INSERT INTO nebenkosten_statements (lease_id, year, total_actual_costs, total_advance_paid, balance) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [l.id, year, allocatedCost, annualAdvance, balance],
+    );
+    if (r.changes) generated++;
+  }
+  return c.json({ generated, year });
+});
+
+app.get("/api/nebenkosten-statements", async (c) => {
+  const leaseId = intParam(c.req.query("lease_id"));
+  const rows = await query("SELECT * FROM nebenkosten_statements " + (leaseId ? "WHERE lease_id = ?" : ""), leaseId ? [leaseId] : []);
+  return c.json({ statements: rows });
 });
 
 // ── Health ─────────────────────────────────────────────────────────

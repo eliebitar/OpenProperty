@@ -37,6 +37,8 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [rent, setRent] = useState("0");
+  const [operatingAdvance, setOperatingAdvance] = useState("0");
+  const [heatingAdvance, setHeatingAdvance] = useState("0");
   const [deposit, setDeposit] = useState("0");
   const [dueDay, setDueDay] = useState("1");
   const [lateFee, setLateFee] = useState("0");
@@ -67,6 +69,8 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
     setStart(lease?.start_date ?? today);
     setEnd(lease?.end_date ?? toIsoDate(oneYear));
     setRent(String(lease?.monthly_rent ?? 0));
+    setOperatingAdvance(String(lease?.operating_cost_advance ?? 0));
+    setHeatingAdvance(String(lease?.heating_cost_advance ?? 0));
     setDeposit(String(lease?.deposit ?? 0));
     setDueDay(String(lease?.rent_due_day ?? app.settings.default_rent_due_day));
     setLateFee(String(lease?.late_fee ?? app.settings.late_fee_amount));
@@ -79,6 +83,9 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
   useEffect(() => {
     if (!lease && selectedUnit && parseFloat(rent) === 0) {
       setRent(String(selectedUnit.market_rent ?? 0));
+    }
+    if (!lease && selectedUnit && parseFloat(operatingAdvance) === 0 && selectedUnit.monthly_operating_cost) {
+      setOperatingAdvance(String(selectedUnit.monthly_operating_cost));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUnit?.id]);
@@ -93,6 +100,8 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
         start_date: start,
         end_date: end,
         monthly_rent: parseFloat(rent) || 0,
+        operating_cost_advance: parseFloat(operatingAdvance) || 0,
+        heating_cost_advance: parseFloat(heatingAdvance) || 0,
         deposit: parseFloat(deposit) || 0,
         rent_due_day: Math.min(31, Math.max(1, parseInt(dueDay, 10) || 1)),
         late_fee: parseFloat(lateFee) || 0,
@@ -191,13 +200,21 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
               <Input id="l-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="l-rent">Monthly rent</Label>
+          <div className="grid grid-cols-4 gap-3 items-end">
+            <div className="col-span-1 flex flex-col justify-end">
+              <Label htmlFor="l-rent" className="min-h-[1.5rem] flex items-end pb-1 font-medium">Cold Rent</Label>
               <Input id="l-rent" type="number" value={rent} onChange={(e) => setRent(e.target.value)} />
             </div>
-            <div>
-              <Label htmlFor="l-dep">Security deposit</Label>
+            <div className="col-span-1 flex flex-col justify-end">
+              <Label htmlFor="l-op-adv" title="Betriebskostenvorauszahlung" className="min-h-[1.5rem] flex items-end pb-1 font-medium">Op. Costs</Label>
+              <Input id="l-op-adv" type="number" value={operatingAdvance} onChange={(e) => setOperatingAdvance(e.target.value)} />
+            </div>
+            <div className="col-span-1 flex flex-col justify-end">
+              <Label htmlFor="l-heat-adv" title="Heizkostenvorauszahlung" className="min-h-[1.5rem] flex items-end pb-1 font-medium">Heating</Label>
+              <Input id="l-heat-adv" type="number" value={heatingAdvance} onChange={(e) => setHeatingAdvance(e.target.value)} />
+            </div>
+            <div className="col-span-1 flex flex-col justify-end">
+              <Label htmlFor="l-dep" className="min-h-[1.5rem] flex items-end pb-1 font-medium">Deposit</Label>
               <Input id="l-dep" type="number" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
             </div>
           </div>

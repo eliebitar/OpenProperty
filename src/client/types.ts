@@ -25,10 +25,12 @@ export interface Unit {
   id: number;
   property_id: number;
   name: string;
+  type: string;
   bedrooms: number;
   bathrooms: number;
   sqft: number | null;
   market_rent: number;
+  monthly_operating_cost?: number;
   status: UnitStatus;
   notes: string | null;
   created_at: string;
@@ -38,7 +40,11 @@ export interface Unit {
   property_address?: string | null;
   property_city?: string | null;
   active_lease_id?: number | null;
+  active_tenant_id?: number | null;
   active_tenant_name?: string | null;
+  active_rent?: number | null;
+  active_operating_advance?: number | null;
+  active_heating_advance?: number | null;
 }
 
 export interface Tenant {
@@ -68,6 +74,8 @@ export interface Lease {
   start_date: string;
   end_date: string;
   monthly_rent: number;
+  operating_cost_advance: number;
+  heating_cost_advance: number;
   deposit: number;
   rent_due_day: number;
   late_fee: number;
@@ -217,3 +225,68 @@ export type NewLease = Partial<Omit<Lease, "id" | "created_at" | "unit_name" | "
 export type NewWorkOrder = Partial<Omit<WorkOrder, "id" | "created_at" | "property_name" | "property_color" | "unit_name" | "tenant_first_name" | "tenant_last_name" | "vendor_name" | "vendor_color">> & { title: string };
 export type NewVendor = Partial<Omit<Vendor, "id" | "created_at">> & { name: string };
 export type NewApplication = Partial<Omit<Application, "id" | "created_at" | "unit_name" | "property_name">> & { first_name: string; last_name: string };
+
+export interface OperatingCost {
+  id: number;
+  property_id: number;
+  year: number;
+  cost_type: string;
+  amount: number;
+  is_commercial_only: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface NebenkostenStatement {
+  id: number;
+  lease_id: number;
+  year: number;
+  total_actual_costs: number;
+  total_advance_paid: number;
+  balance: number;
+  created_at: string;
+}
+
+export interface CostAllocationItem {
+  cost_id: number;
+  cost_type: string;
+  total_property_amount: number;
+  is_commercial_only: boolean;
+  allocation_key: string;
+  unit_share_amount: number;
+}
+
+export interface UnitOperatingCostBreakdown {
+  unit_id: number;
+  unit_name: string;
+  unit_type: "residential" | "commercial";
+  sqft: number;
+  sqft_share_pct: number;
+  allocated_cost: number;
+  lease_id: number | null;
+  tenant_name: string | null;
+  operating_cost_advance: number;
+  heating_cost_advance: number;
+  monthly_advance: number;
+  annual_advance: number;
+  balance: number;
+  is_vacant: boolean;
+  cost_items: CostAllocationItem[];
+  statement_id: number | null;
+}
+
+export interface OperatingCostsSummary {
+  property_id: number;
+  property_name: string;
+  year: number;
+  total_property_costs: number;
+  shared_costs: number;
+  commercial_only_costs: number;
+  total_sqft: number;
+  total_residential_sqft: number;
+  total_commercial_sqft: number;
+  cost_per_sqft: number;
+  shared_cost_per_sqft: number;
+  costs: OperatingCost[];
+  units: UnitOperatingCostBreakdown[];
+}
