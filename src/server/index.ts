@@ -1,8 +1,9 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { initDB, query, get, run } from "./db";
+import { authMiddleware, getKeycloakConfig, type ServerEnv } from "./auth";
 
-type Env = { Bindings: { DB: D1Database } };
+type Env = ServerEnv;
 
 const app = new Hono<Env>();
 
@@ -11,6 +12,8 @@ app.use("*", async (c, next) => {
   await ensureSeeded();
   await next();
 });
+
+app.use("/api/*", authMiddleware);
 
 // ── First-run data ─────────────────────────────────────────────────
 // A deploy applies `schema.sql` as DDL only — a seed INSERT there fails the
@@ -23,6 +26,11 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   late_fee_amount: "50",
   late_fee_grace_days: "5",
   currency: "USD",
+  keycloak_enabled: "false",
+  keycloak_url: "http://localhost:8080",
+  keycloak_realm: "openproperty",
+  keycloak_client_id: "openproperty-client",
+  keycloak_required: "false",
 };
 
 const DEMO_PROPERTIES: Array<[string, string, string, string, string, string, string]> = [
@@ -940,6 +948,72 @@ app.put("/api/settings", async (c) => {
   const out: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: out });
+});
+
+// ── Keycloak Authentication ─────────────────────────────────────────
+
+app.get("/api/auth/config", async (c) => {
+  const config = await getKeycloakConfig(c);
+  return c.json(config);
+});
+
+app.get("/api/auth/me", (c) => {
+  const user = c.get("user");
+  const config = c.get("keycloakConfig");
+  return c.json({
+    authenticated: !!user,
+    user: user || null,
+    keycloakEnabled: config?.enabled ?? false,
+  });
+});
+
+app.post("/api/auth/test-connection", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const data = body && typeof body === "object" ? (body as Record<string, string>) : {};
+  const currentConfig = await getKeycloakConfig(c);
+  const rawUrl = data.url || currentConfig.url;
+  const url = rawUrl.replace(/\/+$/, "");
+  const realm = data.realm || currentConfig.realm;
+
+  const oidcUrl = `${url}/realms/${realm}/.well-known/openid-configuration`;
+  try {
+    const res = await fetch(oidcUrl, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: `Keycloak returned status ${res.status} (${res.statusText})`,
+          oidcUrl,
+        },
+        400,
+      );
+    }
+    const oidcData = (await res.json()) as Record<string, unknown>;
+    return c.json({
+      ok: true,
+      issuer: oidcData.issuer,
+      authorization_endpoint: oidcData.authorization_endpoint,
+      token_endpoint: oidcData.token_endpoint,
+      jwks_uri: oidcData.jwks_uri,
+      oidcUrl,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        ok: false,
+        error: `Failed to connect to Keycloak: ${(err as Error).message}`,
+        oidcUrl,
+      },
+      500,
+    );
+  }
 });
 
 // ── Health ─────────────────────────────────────────────────────────

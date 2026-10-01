@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm db:migrate && concurrently -n ui,api -c cyan,green \"vite\" \"wrangler dev --port 8787\"",
+    "dev": "npm run db:migrate && concurrently -n ui,api -c cyan,green \"vite --host 0.0.0.0\" \"wrangler dev --ip 0.0.0.0 --port 8787\"",
     "db:migrate": "wrangler d1 execute open-property-db --local --file=src/server/schema.sql",
     "build": "vite build",
     "typecheck": "tsc --noEmit"
@@ -27,6 +27,8 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "hono": "^4.6.0",
+    "jose": "^6.2.12",
+    "keycloak-js": "^26.2.4",
     "lucide-react": "^0.575.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

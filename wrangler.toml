@@ -7,3 +7,10 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "open-property-db"
 database_id = "local"
+
+[vars]
+KEYCLOAK_URL = "http://localhost:8080"
+KEYCLOAK_REALM = "openproperty"
+KEYCLOAK_CLIENT_ID = "openproperty-client"
+KEYCLOAK_ENABLED = "true"
+KEYCLOAK_REQUIRED = "false"

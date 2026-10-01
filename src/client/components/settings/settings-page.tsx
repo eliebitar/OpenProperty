@@ -21,6 +21,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Vendor, VendorCategory } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
+import { AuthSettingsTab } from "./auth-settings-tab";
+
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];
 
 const VENDOR_CATEGORIES: { value: VendorCategory; label: string }[] = [
@@ -37,7 +39,7 @@ export function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      meta="Vendors and rent policy defaults"
+      meta="Vendors, rent policy defaults, and Keycloak authentication"
       width="max-w-5xl"
     >
 
@@ -45,6 +47,7 @@ export function SettingsPage() {
           <TabsList>
             <TabsTrigger value="vendors">Vendors</TabsTrigger>
             <TabsTrigger value="policy">Rent policy</TabsTrigger>
+            <TabsTrigger value="auth">Authentication</TabsTrigger>
           </TabsList>
 
           <TabsContent value="vendors" className="mt-4">
@@ -52,6 +55,9 @@ export function SettingsPage() {
           </TabsContent>
           <TabsContent value="policy" className="mt-4">
             <PolicyTab />
+          </TabsContent>
+          <TabsContent value="auth" className="mt-4">
+            <AuthSettingsTab />
           </TabsContent>
         </Tabs>
     </PageShell>

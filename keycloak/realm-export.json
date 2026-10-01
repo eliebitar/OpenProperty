@@ -1,0 +1,130 @@
+{
+  "realm": "openproperty",
+  "displayName": "OpenProperty",
+  "displayNameHtml": "<b>OpenProperty</b>",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "OpenProperty Administrator with full privileges"
+      },
+      {
+        "name": "manager",
+        "description": "Property Manager managing units, leases, and work orders"
+      },
+      {
+        "name": "tenant",
+        "description": "Tenant user"
+      }
+    ]
+  },
+  "defaultRoles": [
+    "offline_access",
+    "uma_authorization"
+  ],
+  "clients": [
+    {
+      "clientId": "openproperty-client",
+      "name": "OpenProperty Web App",
+      "description": "Public OIDC client with PKCE for OpenProperty Single Page Application",
+      "rootUrl": "http://localhost:5173",
+      "baseUrl": "http://localhost:5173",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": true,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:8787/*",
+        "http://127.0.0.1:5173/*",
+        "http://127.0.0.1:8787/*",
+        "http://localhost/*",
+        "https://*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "publicClient": true,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:8787/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@openproperty.local",
+      "firstName": "Alex",
+      "lastName": "Admin",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "manager"
+      ]
+    },
+    {
+      "username": "manager",
+      "enabled": true,
+      "email": "manager@openproperty.local",
+      "firstName": "Morgan",
+      "lastName": "Manager",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "manager",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    },
+    {
+      "username": "tenant",
+      "enabled": true,
+      "email": "tenant@openproperty.local",
+      "firstName": "Taylor",
+      "lastName": "Tenant",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "tenant",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "tenant"
+      ]
+    }
+  ]
+}

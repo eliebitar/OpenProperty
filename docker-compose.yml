@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  openproperty:
+    build: .
+    ports:
+      - "5173:5173"
+      - "8787:8787"
+    volumes:
+      - d1-data:/app/.wrangler
+    environment:
+      - NODE_ENV=development
+      - KEYCLOAK_URL=http://localhost:8080
+      - KEYCLOAK_REALM=openproperty
+      - KEYCLOAK_CLIENT_ID=openproperty-client
+      - KEYCLOAK_ENABLED=false
+      - VITE_KEYCLOAK_URL=http://localhost:8080
+      - VITE_KEYCLOAK_REALM=openproperty
+      - VITE_KEYCLOAK_CLIENT_ID=openproperty-client
+      - VITE_KEYCLOAK_ENABLED=false
+    depends_on:
+      - keycloak
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    command: start-dev --import-realm
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+
+volumes:
+  d1-data:

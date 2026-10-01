@@ -46,9 +46,17 @@ Rental property management with everything you need to run a portfolio: properti
 - Vendor directory by category (plumber / electrician / HVAC / handyman / cleaning / landscaping / general)
 - Rent policy defaults: due day, late fee, grace days, currency
 
+### Authentication (Keycloak SSO)
+- **OpenID Connect (OIDC)** authentication with PKCE flow via `keycloak-js`
+- Remote JWKS JWT verification in Hono API backend using `jose`
+- Dynamic configuration via UI in **Settings > Authentication** or environment variables
+- Enforce login mode (`KEYCLOAK_REQUIRED=true`) or permissive SSO
+- Ready-to-use Keycloak container with preconfigured realm export (`keycloak/realm-export.json`)
+
 ## Stack
 
 - React 19 + Vite + TypeScript
+- Keycloak OIDC Authentication (`keycloak-js` + `jose` JWKS verification)
 - Tailwind CSS v4 + shadcn/ui (Radix primitives)
 - Hono on Cloudflare Workers (D1-native — same code locally and in production)
 - `lucide-react` for icons
@@ -64,6 +72,46 @@ pnpm build
 ```
 
 The dev script applies `src/server/schema.sql` to the local D1 database, then runs Vite and Wrangler in parallel. The schema seeds 3 sample properties, 5 units, and 3 vendors so the app is usable on first boot.
+
+## Keycloak Setup
+
+OpenProperty can run standalone in local guest mode, or connected to Keycloak for enterprise Single Sign-On (SSO):
+
+### Quickstart with Docker Compose
+
+To run Keycloak alongside OpenProperty with the pre-configured realm:
+
+```bash
+docker compose up keycloak
+```
+
+This starts Keycloak at `http://localhost:8080` with the `openproperty` realm automatically imported.
+
+**Demo Users:**
+| Username | Password | Role | Description |
+|---|---|---|---|
+| `admin` | `admin` | `admin`, `manager` | Administrator |
+| `manager` | `manager` | `manager` | Property Manager |
+| `tenant` | `tenant` | `tenant` | Tenant User |
+
+**Keycloak Admin Console:**
+- URL: `http://localhost:8080/admin`
+- User: `admin` / `admin`
+
+### Configuration
+
+You can enable and configure Keycloak either:
+1. In the **Settings > Authentication** tab in OpenProperty UI (with live connection testing).
+2. Or via environment variables in `.env` / `wrangler.toml`:
+
+```env
+KEYCLOAK_ENABLED=true
+KEYCLOAK_URL=http://localhost:8080
+KEYCLOAK_REALM=openproperty
+KEYCLOAK_CLIENT_ID=openproperty-client
+KEYCLOAK_REQUIRED=false
+```
+
 
 ## Deploy
 

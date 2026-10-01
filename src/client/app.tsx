@@ -1,5 +1,8 @@
 import { useEffect } from "react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
+import { AuthProvider, useAuth } from "./auth";
+import { UserMenu } from "./components/auth/user-menu";
+import { LoginGate } from "./components/auth/login-gate";
 import { useAppState } from "./hooks/use-app-state";
 import { useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
@@ -49,6 +52,16 @@ function activeFor(route: Route): string {
 }
 
 export function App() {
+  return (
+    <AuthProvider>
+      <LoginGate>
+        <AppContent />
+      </LoginGate>
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
   const state = useAppState();
   const { path, route, navigate } = useRouter();
 
@@ -76,7 +89,9 @@ export function App() {
             groups={groups}
             active={activeFor(route)}
             onNavigate={(item) => navigate(item.href ?? "/dashboard")}
-          />
+          >
+            <UserMenu onNavigateSettings={() => navigate("/settings")} />
+          </AppNav>
         </div>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {state.loading ? (
