@@ -386,3 +386,27 @@ export interface AirbnbAnalytics {
   }[];
 }
 
+export interface DemoDataStatus {
+  hasDemoData: boolean;
+  counts: {
+    properties: number;
+    units: number;
+    bookings: number;
+    vendors: number;
+    workOrders: number;
+  };
+  demoProperties: string[];
+}
+
+export interface DeleteDemoDataResult {
+  ok: boolean;
+  message: string;
+  deleted: {
+    properties: number;
+    units: number;
+    bookings: number;
+    workOrders: number;
+    vendors: number;
+    leases: number;
+  };
+}

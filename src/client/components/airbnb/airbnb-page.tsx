@@ -16,6 +16,8 @@ import {
   ChevronRight,
   AlertCircle,
   Building2,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
@@ -26,6 +28,16 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageShell } from "@/components/page-shell";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { BookingDialog } from "./booking-dialog";
 import { GuestPackDialog } from "./guest-pack-dialog";
 import type { AirbnbAnalytics, AirbnbBooking, BookingStatus, Unit } from "@/types";
@@ -64,6 +76,23 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
   const [guestPackOpen, setGuestPackOpen] = useState(false);
   const [guestPackBooking, setGuestPackBooking] = useState<AirbnbBooking | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [confirmDemoOpen, setConfirmDemoOpen] = useState(false);
+  const [deletingDemo, setDeletingDemo] = useState(false);
+
+  async function handleDeleteDemo() {
+    try {
+      setDeletingDemo(true);
+      const res = await app.deleteDemoData();
+      await loadData();
+      setActionSuccess(res.message);
+      setTimeout(() => setActionSuccess(null), 4000);
+      setConfirmDemoOpen(false);
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setDeletingDemo(false);
+    }
+  }
 
   async function loadData() {
     try {
@@ -287,15 +316,26 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
               <Building2 className="size-4 text-rose-500" />
               Airbnb Unit Portfolio ({airbnbUnits.length} listing{airbnbUnits.length === 1 ? "" : "s"})
             </h2>
-            {navigate && (
-              <button
-                type="button"
-                onClick={() => navigate("/properties")}
-                className="text-xs font-medium text-primary hover:underline flex items-center gap-0.5"
-              >
-                Manage in Properties <ChevronRight className="size-3" />
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {airbnbUnits.some((u) => u.name.includes("Suite 4B") || u.property_name === "Oakwood Estate") && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDemoOpen(true)}
+                  className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1"
+                >
+                  <Trash2 className="size-3" /> Delete Dummy Data
+                </button>
+              )}
+              {navigate && (
+                <button
+                  type="button"
+                  onClick={() => navigate("/properties")}
+                  className="text-xs font-medium text-primary hover:underline flex items-center gap-0.5"
+                >
+                  Manage in Properties <ChevronRight className="size-3" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -308,6 +348,8 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
                       b.check_in_date <= toIsoDate(new Date()) &&
                       b.check_out_date >= toIsoDate(new Date()))),
               );
+
+              const isDemoUnit = u.name.includes("Suite 4B") || u.property_name === "Oakwood Estate";
 
               return (
                 <Card
@@ -336,6 +378,11 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
                           <span className="rounded-full bg-rose-500/15 px-2 py-0.2 text-[10px] font-bold text-rose-600 dark:text-rose-400">
                             Airbnb
                           </span>
+                          {isDemoUnit && (
+                            <span className="rounded-full bg-amber-500/15 px-2 py-0.2 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border border-amber-500/25">
+                              Sample
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{u.property_name}</p>
                       </div>
@@ -660,6 +707,36 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
         onOpenChange={setGuestPackOpen}
         booking={guestPackBooking}
       />
+
+      {/* Confirmation Modal to Delete Only Dummy Data */}
+      <AlertDialog open={confirmDemoOpen} onOpenChange={setConfirmDemoOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="size-5" />
+              Delete Only Dummy Data?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2.5 text-xs text-muted-foreground pt-1">
+              <p>
+                This will delete the 3 sample properties (Oakwood Estate, Honeybee Hideaway, 308 Mission Apartments), the sample Suite 4B Airbnb Loft, and sample bookings.
+              </p>
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-emerald-900 dark:text-emerald-200">
+                ✓ <strong>Your real data is completely safe:</strong> Your real properties (such as <em>Mauerstraße 15</em>), your real Airbnb units, and all real reservations will remain untouched.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4">
+            <AlertDialogCancel disabled={deletingDemo}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteDemo}
+              disabled={deletingDemo}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {deletingDemo ? "Deleting…" : "Yes, Delete Dummy Data"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageShell>
   );
 }

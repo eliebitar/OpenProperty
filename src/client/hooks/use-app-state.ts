@@ -17,6 +17,8 @@ import type {
   AirbnbBooking,
   NewAirbnbBooking,
   AirbnbAnalytics,
+  DemoDataStatus,
+  DeleteDemoDataResult,
 } from "../types";
 
 export interface AppSettings {
@@ -306,6 +308,22 @@ export function useAppState() {
     return await api<AirbnbAnalytics>("GET", path);
   }, []);
 
+  const getDemoDataStatus = useCallback(async (): Promise<DemoDataStatus> => {
+    return await api<DemoDataStatus>("GET", "/api/demo-data/status");
+  }, []);
+
+  const deleteDemoData = useCallback(async (): Promise<DeleteDemoDataResult> => {
+    const res = await api<DeleteDemoDataResult>("POST", "/api/demo-data/delete");
+    await refreshLookups();
+    return res;
+  }, [refreshLookups]);
+
+  const restoreDemoData = useCallback(async (): Promise<{ ok: boolean; message: string }> => {
+    const res = await api<{ ok: boolean; message: string }>("POST", "/api/demo-data/restore");
+    await refreshLookups();
+    return res;
+  }, [refreshLookups]);
+
   return {
     // data
     properties, vendors, settings,
@@ -330,6 +348,8 @@ export function useAppState() {
     // airbnb
     listAirbnbBookings, createAirbnbBooking, updateAirbnbBooking, deleteAirbnbBooking,
     scheduleTurnoverCleaning, getAirbnbAnalytics,
+    // demo data management
+    getDemoDataStatus, deleteDemoData, restoreDemoData,
   };
 }
 

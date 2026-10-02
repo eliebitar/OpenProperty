@@ -119,6 +119,11 @@ async function ensureSeeded(): Promise<void> {
     await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_dates ON airbnb_bookings(check_in_date, check_out_date)");
     await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_status ON airbnb_bookings(booking_status)");
 
+    const cleared = await get<{ value: string }>("SELECT value FROM settings WHERE key = 'sample_data_cleared'");
+    if (cleared?.value === "true") {
+      return;
+    }
+
     const props = await get<{ n: number }>("SELECT COUNT(*) AS n FROM properties");
     if ((props?.n ?? 0) === 0) {
       const ids: number[] = [];
@@ -1251,6 +1256,231 @@ app.put("/api/settings", async (c) => {
   const out: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: out });
+});
+
+// ── Demo / Sample Data Management ──────────────────────────────────
+
+const DEMO_PROPERTY_NAMES = ["Oakwood Estate", "Honeybee Hideaway", "308 Mission Apartments"];
+const DEMO_UNIT_NAMES = ["Suite 4B - Designer Loft (Airbnb)"];
+const DEMO_VENDOR_NAMES = [
+  "Emerald Pool Service",
+  "Hill Country Plumbing",
+  "Bright Spark Electric",
+  "Sparkle Clean Turnover Services",
+];
+
+app.get("/api/demo-data/status", async (c) => {
+  const pPlaceholders = DEMO_PROPERTY_NAMES.map(() => "?").join(",");
+  const demoProps = await query<{ id: number; name: string }>(
+    `SELECT id, name FROM properties WHERE name IN (${pPlaceholders})`,
+    DEMO_PROPERTY_NAMES,
+  ).catch(() => []);
+  const demoPropIds = demoProps.map((p) => p.id);
+
+  let demoUnitIds: number[] = [];
+  if (demoPropIds.length > 0) {
+    const propPlaceholders = demoPropIds.map(() => "?").join(",");
+    const demoUnits = await query<{ id: number; name: string }>(
+      `SELECT id, name FROM units WHERE property_id IN (${propPlaceholders}) OR name IN ('Suite 4B - Designer Loft (Airbnb)')`,
+      demoPropIds,
+    ).catch(() => []);
+    demoUnitIds = demoUnits.map((u) => u.id);
+  } else {
+    const demoUnits = await query<{ id: number; name: string }>(
+      `SELECT id, name FROM units WHERE name IN ('Suite 4B - Designer Loft (Airbnb)')`,
+    ).catch(() => []);
+    demoUnitIds = demoUnits.map((u) => u.id);
+  }
+
+  let bookingCount = 0;
+  if (demoUnitIds.length > 0) {
+    const uPlaceholders = demoUnitIds.map(() => "?").join(",");
+    const bRow = await get<{ n: number }>(
+      `SELECT COUNT(*) as n FROM airbnb_bookings WHERE unit_id IN (${uPlaceholders})`,
+      demoUnitIds,
+    ).catch(() => ({ n: 0 }));
+    bookingCount = bRow?.n ?? 0;
+  }
+
+  const vPlaceholders = DEMO_VENDOR_NAMES.map(() => "?").join(",");
+  const vRow = await get<{ n: number }>(
+    `SELECT COUNT(*) as n FROM vendors WHERE name IN (${vPlaceholders})`,
+    DEMO_VENDOR_NAMES,
+  ).catch(() => ({ n: 0 }));
+  const vendorCount = vRow?.n ?? 0;
+
+  let workOrdersCount = 0;
+  if (demoPropIds.length > 0 || demoUnitIds.length > 0) {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (demoPropIds.length > 0) {
+      clauses.push(`property_id IN (${demoPropIds.map(() => "?").join(",")})`);
+      params.push(...demoPropIds);
+    }
+    if (demoUnitIds.length > 0) {
+      clauses.push(`unit_id IN (${demoUnitIds.map(() => "?").join(",")})`);
+      params.push(...demoUnitIds);
+    }
+    const woRow = await get<{ n: number }>(
+      `SELECT COUNT(*) as n FROM work_orders WHERE ${clauses.join(" OR ")}`,
+      params,
+    ).catch(() => ({ n: 0 }));
+    workOrdersCount = woRow?.n ?? 0;
+  }
+
+  const hasDemoData = demoProps.length > 0 || demoUnitIds.length > 0;
+
+  return c.json({
+    hasDemoData,
+    counts: {
+      properties: demoProps.length,
+      units: demoUnitIds.length,
+      bookings: bookingCount,
+      vendors: vendorCount,
+      workOrders: workOrdersCount,
+    },
+    demoProperties: demoProps.map((p) => p.name),
+  });
+});
+
+app.post("/api/demo-data/delete", async (c) => {
+  const pPlaceholders = DEMO_PROPERTY_NAMES.map(() => "?").join(",");
+  const demoProps = await query<{ id: number; name: string }>(
+    `SELECT id, name FROM properties WHERE name IN (${pPlaceholders})`,
+    DEMO_PROPERTY_NAMES,
+  ).catch(() => []);
+  const demoPropIds = demoProps.map((p) => p.id);
+
+  let demoUnitIds: number[] = [];
+  if (demoPropIds.length > 0) {
+    const propPlaceholders = demoPropIds.map(() => "?").join(",");
+    const demoUnits = await query<{ id: number; name: string }>(
+      `SELECT id, name FROM units WHERE property_id IN (${propPlaceholders}) OR name IN ('Suite 4B - Designer Loft (Airbnb)')`,
+      demoPropIds,
+    ).catch(() => []);
+    demoUnitIds = demoUnits.map((u) => u.id);
+  } else {
+    const demoUnits = await query<{ id: number; name: string }>(
+      `SELECT id FROM units WHERE name IN ('Suite 4B - Designer Loft (Airbnb)')`,
+    ).catch(() => []);
+    demoUnitIds = demoUnits.map((u) => u.id);
+  }
+
+  const deletedCounts = {
+    properties: demoProps.length,
+    units: demoUnitIds.length,
+    bookings: 0,
+    workOrders: 0,
+    vendors: 0,
+    leases: 0,
+  };
+
+  // 1. Delete work orders for demo properties or demo units
+  if (demoPropIds.length > 0 || demoUnitIds.length > 0) {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (demoPropIds.length > 0) {
+      clauses.push(`property_id IN (${demoPropIds.map(() => "?").join(",")})`);
+      params.push(...demoPropIds);
+    }
+    if (demoUnitIds.length > 0) {
+      clauses.push(`unit_id IN (${demoUnitIds.map(() => "?").join(",")})`);
+      params.push(...demoUnitIds);
+    }
+    const woCount = await get<{ n: number }>(`SELECT COUNT(*) as n FROM work_orders WHERE ${clauses.join(" OR ")}`, params);
+    deletedCounts.workOrders = woCount?.n ?? 0;
+    await run(`DELETE FROM work_orders WHERE ${clauses.join(" OR ")}`, params);
+  }
+
+  // 2. Delete airbnb bookings for demo units
+  if (demoUnitIds.length > 0) {
+    const uPlaceholders = demoUnitIds.map(() => "?").join(",");
+    const bCount = await get<{ n: number }>(`SELECT COUNT(*) as n FROM airbnb_bookings WHERE unit_id IN (${uPlaceholders})`, demoUnitIds);
+    deletedCounts.bookings = bCount?.n ?? 0;
+    await run(`DELETE FROM airbnb_bookings WHERE unit_id IN (${uPlaceholders})`, demoUnitIds);
+  }
+
+  // 3. Delete payments, charges, leases, and nebenkosten for demo units
+  if (demoUnitIds.length > 0) {
+    const uPlaceholders = demoUnitIds.map(() => "?").join(",");
+    await run(`
+      DELETE FROM payments WHERE charge_id IN (
+        SELECT id FROM rent_charges WHERE lease_id IN (
+          SELECT id FROM leases WHERE unit_id IN (${uPlaceholders})
+        )
+      )
+    `, demoUnitIds);
+
+    await run(`
+      DELETE FROM rent_charges WHERE lease_id IN (
+        SELECT id FROM leases WHERE unit_id IN (${uPlaceholders})
+      )
+    `, demoUnitIds);
+
+    await run(`
+      DELETE FROM nebenkosten_statements WHERE lease_id IN (
+        SELECT id FROM leases WHERE unit_id IN (${uPlaceholders})
+      )
+    `, demoUnitIds);
+
+    const lCount = await get<{ n: number }>(`SELECT COUNT(*) as n FROM leases WHERE unit_id IN (${uPlaceholders})`, demoUnitIds);
+    deletedCounts.leases = lCount?.n ?? 0;
+    await run(`DELETE FROM leases WHERE unit_id IN (${uPlaceholders})`, demoUnitIds);
+  }
+
+  // 4. Delete operating costs for demo properties
+  if (demoPropIds.length > 0) {
+    const pPlaceholders = demoPropIds.map(() => "?").join(",");
+    await run(`DELETE FROM operating_costs WHERE property_id IN (${pPlaceholders})`, demoPropIds);
+  }
+
+  // 5. Delete demo units
+  if (demoUnitIds.length > 0) {
+    const uPlaceholders = demoUnitIds.map(() => "?").join(",");
+    await run(`DELETE FROM units WHERE id IN (${uPlaceholders})`, demoUnitIds);
+  }
+
+  // 6. Delete demo properties
+  if (demoPropIds.length > 0) {
+    const pPlaceholders = demoPropIds.map(() => "?").join(",");
+    await run(`DELETE FROM properties WHERE id IN (${pPlaceholders})`, demoPropIds);
+  }
+
+  // 7. Delete demo vendors only if they have NO remaining work orders
+  const vPlaceholders = DEMO_VENDOR_NAMES.map(() => "?").join(",");
+  const safeVendors = await query<{ id: number }>(`
+    SELECT id FROM vendors
+    WHERE name IN (${vPlaceholders})
+      AND id NOT IN (SELECT DISTINCT vendor_id FROM work_orders WHERE vendor_id IS NOT NULL)
+  `, DEMO_VENDOR_NAMES).catch(() => []);
+
+  if (safeVendors.length > 0) {
+    deletedCounts.vendors = safeVendors.length;
+    const svPlaceholders = safeVendors.map(() => "?").join(",");
+    await run(`DELETE FROM vendors WHERE id IN (${svPlaceholders})`, safeVendors.map((v) => v.id));
+  }
+
+  // 8. Mark sample data as cleared in settings so ensureSeeded() will never restore it
+  await run(`
+    INSERT INTO settings (key, value, updated_at) VALUES ('sample_data_cleared', 'true', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = datetime('now')
+  `);
+
+  return c.json({
+    ok: true,
+    message: "Dummy data successfully deleted. Your real properties and data are preserved.",
+    deleted: deletedCounts,
+  });
+});
+
+app.post("/api/demo-data/restore", async (c) => {
+  await run(`
+    INSERT INTO settings (key, value, updated_at) VALUES ('sample_data_cleared', 'false', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = 'false', updated_at = datetime('now')
+  `);
+  seeded = false;
+  await ensureSeeded();
+  return c.json({ ok: true, message: "Sample data restored successfully." });
 });
 
 // ── Keycloak Authentication ─────────────────────────────────────────

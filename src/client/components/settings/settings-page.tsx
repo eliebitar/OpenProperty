@@ -22,6 +22,7 @@ import type { Vendor, VendorCategory } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
 import { AuthSettingsTab } from "./auth-settings-tab";
+import { DataManagementTab } from "./data-management-tab";
 
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];
 
@@ -39,7 +40,7 @@ export function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      meta="Vendors, rent policy defaults, and Keycloak authentication"
+      meta="Vendors, rent policy defaults, Keycloak authentication, and sample data management"
       width="max-w-5xl"
     >
 
@@ -48,6 +49,7 @@ export function SettingsPage() {
             <TabsTrigger value="vendors">Vendors</TabsTrigger>
             <TabsTrigger value="policy">Rent policy</TabsTrigger>
             <TabsTrigger value="auth">Authentication</TabsTrigger>
+            <TabsTrigger value="data">Data Management</TabsTrigger>
           </TabsList>
 
           <TabsContent value="vendors" className="mt-4">
@@ -58,6 +60,9 @@ export function SettingsPage() {
           </TabsContent>
           <TabsContent value="auth" className="mt-4">
             <AuthSettingsTab />
+          </TabsContent>
+          <TabsContent value="data" className="mt-4">
+            <DataManagementTab />
           </TabsContent>
         </Tabs>
     </PageShell>
