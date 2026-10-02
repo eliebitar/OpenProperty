@@ -121,11 +121,19 @@ export function EmailSettingsTab() {
   }, [user?.email, testRecipient]);
 
   // Presets
-  const applyPreset = (preset: "gmail" | "outlook" | "resend" | "sendgrid" | "brevo") => {
+  const applyPreset = (preset: "gmail" | "outlook" | "resend" | "sendgrid" | "brevo" | "ionos") => {
     setTestResult(null);
     setSaveSuccess(false);
 
-    if (preset === "gmail") {
+    if (preset === "ionos") {
+      setProvider("smtp");
+      setSmtpHost("smtp.ionos.de");
+      setSmtpPort(465);
+      setSmtpSecure(true);
+      if (!fromAddress || fromAddress.includes("openproperty.local")) {
+        setFromAddress("info@your-domain.com");
+      }
+    } else if (preset === "gmail") {
       setProvider("smtp");
       setSmtpHost("smtp.gmail.com");
       setSmtpPort(465);
@@ -283,6 +291,15 @@ export function EmailSettingsTab() {
             <Button
               type="button"
               size="sm"
+              variant={provider === "smtp" && smtpHost === "smtp.ionos.de" ? "default" : "outline"}
+              className="h-7 text-xs px-2.5"
+              onClick={() => applyPreset("ionos")}
+            >
+              IONOS (1&1)
+            </Button>
+            <Button
+              type="button"
+              size="sm"
               variant={provider === "smtp" && smtpHost === "smtp.gmail.com" ? "default" : "outline"}
               className="h-7 text-xs px-2.5"
               onClick={() => applyPreset("gmail")}
@@ -417,9 +434,21 @@ export function EmailSettingsTab() {
                     type="number"
                     placeholder="465"
                     value={smtpPort}
-                    onChange={(e) => setSmtpPort(parseInt(e.target.value, 10) || 465)}
+                    onChange={(e) => {
+                      const p = parseInt(e.target.value, 10) || 465;
+                      setSmtpPort(p);
+                      if (p === 465) setSmtpSecure(true);
+                      if (p === 587) setSmtpSecure(false);
+                    }}
                     required={provider === "smtp"}
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    {smtpPort === 465
+                      ? "Port 465: Direct SSL/TLS (Recommended for IONOS, Gmail, Yahoo)"
+                      : smtpPort === 587
+                      ? "Port 587: Submission with STARTTLS"
+                      : `Port ${smtpPort}`}
+                  </p>
                 </div>
 
                 <div className="space-y-1.5 sm:col-span-3 flex items-center gap-2">

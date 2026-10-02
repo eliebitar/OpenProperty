@@ -401,11 +401,17 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
 
   const from = opts.from || cfg.fromAddress;
   const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
-  const useTls = cfg.smtpSecure ?? port === 465;
+  
+  // Port 465 is direct SSL/TLS (SMTPS).
+  // Port 587 & 25 are submission/relay ports that connect in plaintext and upgrade via STARTTLS.
+  const isDirectTls = port === 465 || (cfg.smtpSecure && port !== 587 && port !== 25);
 
   let socket: any;
   try {
-    socket = connect({ hostname: host, port }, { secureTransport: useTls ? "on" : "off", allowHalfOpen: false });
+    socket = connect(
+      { hostname: host, port },
+      { secureTransport: isDirectTls ? "on" : "starttls", allowHalfOpen: false }
+    );
   } catch (err) {
     return {
       ok: false,
@@ -413,8 +419,8 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
     };
   }
 
-  const reader = socket.readable.getReader();
-  const writer = socket.writable.getWriter();
+  let reader = socket.readable.getReader();
+  let writer = socket.writable.getWriter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -422,21 +428,27 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
     await writer.write(encoder.encode(command + "\r\n"));
   };
 
+  let buffer = "";
   const readResponse = async (): Promise<{ code: number; text: string }> => {
-    let raw = "";
+    let raw = buffer;
+    buffer = "";
     while (true) {
+      if (raw.includes("\r\n") || raw.includes("\n")) {
+        const lines = raw.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          // In SMTP RFC 5321, multiline replies end ONLY with a 3-digit code followed by a SPACE (not hyphen)
+          if (/^\d{3} /.test(line)) {
+            const code = parseInt(line.slice(0, 3), 10);
+            const consumed = lines.slice(0, i + 1).join("\n");
+            buffer = lines.slice(i + 1).join("\n");
+            return { code, text: consumed.trim() };
+          }
+        }
+      }
       const { value, done } = await reader.read();
       if (done) break;
       raw += decoder.decode(value, { stream: true });
-      if (raw.includes("\r\n") || raw.includes("\n")) {
-        const lines = raw.trim().split(/\r?\n/);
-        const lastLine = lines[lines.length - 1];
-        // Standard SMTP response code (3 digits followed by space or hyphen)
-        if (/^\d{3}[ -]/.test(lastLine)) {
-          const code = parseInt(lastLine.slice(0, 3), 10);
-          return { code, text: raw.trim() };
-        }
-      }
     }
     const code = parseInt(raw.trim().slice(0, 3), 10);
     return { code: Number.isFinite(code) ? code : 500, text: raw.trim() };
@@ -449,14 +461,41 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
       throw new Error(`SMTP banner rejected: ${banner.text}`);
     }
 
-    // 2. Send EHLO
+    // 2. Send initial EHLO
     await send("EHLO openproperty.local");
     const ehloRes = await readResponse();
     if (ehloRes.code >= 400) {
       throw new Error(`EHLO rejected: ${ehloRes.text}`);
     }
 
-    // 3. Authenticate if username and password are provided
+    // 3. Negotiate STARTTLS if not already direct TLS
+    if (!isDirectTls && (ehloRes.text.toUpperCase().includes("STARTTLS") || port === 587)) {
+      await send("STARTTLS");
+      const tlsRes = await readResponse();
+      if (tlsRes.code === 220) {
+        try {
+          writer.releaseLock();
+          reader.releaseLock();
+          socket = socket.startTls();
+          reader = socket.readable.getReader();
+          writer = socket.writable.getWriter();
+          buffer = "";
+
+          // RFC 3207: Client MUST re-issue EHLO after TLS handshake
+          await send("EHLO openproperty.local");
+          const secureEhlo = await readResponse();
+          if (secureEhlo.code >= 400) {
+            throw new Error(`Post-TLS EHLO rejected: ${secureEhlo.text}`);
+          }
+        } catch (tlsErr) {
+          throw new Error(`STARTTLS upgrade failed: ${(tlsErr as Error).message}`);
+        }
+      } else {
+        throw new Error(`STARTTLS rejected by server: ${tlsRes.text}`);
+      }
+    }
+
+    // 4. Authenticate if username and password are provided
     if (user && pass) {
       await send("AUTH LOGIN");
       const authPrompt1 = await readResponse();
@@ -477,14 +516,14 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
       }
     }
 
-    // 4. MAIL FROM
+    // 5. MAIL FROM
     await send(`MAIL FROM:<${from}>`);
     const mailRes = await readResponse();
     if (mailRes.code >= 400) {
       throw new Error(`MAIL FROM failed: ${mailRes.text}`);
     }
 
-    // 5. RCPT TO for each recipient
+    // 6. RCPT TO for each recipient
     for (const recipient of toList) {
       await send(`RCPT TO:<${recipient}>`);
       const rcptRes = await readResponse();
@@ -493,14 +532,14 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
       }
     }
 
-    // 6. DATA
+    // 7. DATA
     await send("DATA");
     const dataPrompt = await readResponse();
     if (dataPrompt.code !== 354) {
       throw new Error(`DATA prompt rejected: ${dataPrompt.text}`);
     }
 
-    // 7. Send RFC 5322 MIME message
+    // 8. Send RFC 5322 MIME message
     const messageDate = new Date().toUTCString();
     const messageId = `<op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@openproperty.local>`;
     const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -539,19 +578,25 @@ async function sendViaSmtpSocket(cfg: EmailConfig, opts: SendEmailOptions): Prom
       throw new Error(`Message delivery rejected: ${msgRes.text}`);
     }
 
-    // 8. QUIT
+    // 9. QUIT
     await send("QUIT");
     return { ok: true, messageId };
   } catch (err) {
-    return { ok: false, error: (err as Error).message || "SMTP error" };
+    let errMsg = (err as Error).message || "SMTP error";
+    if (errMsg.includes("Stream was cancelled")) {
+      errMsg = `Connection was cancelled by server ('Stream was cancelled'). For IONOS, Gmail, or standard providers, switch to Port 465 with SSL/TLS enabled.`;
+    }
+    return { ok: false, error: errMsg };
   } finally {
     try {
       writer.releaseLock();
+    } catch {}
+    try {
       reader.releaseLock();
+    } catch {}
+    try {
       socket.close();
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }
 }
 
