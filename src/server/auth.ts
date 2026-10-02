@@ -229,6 +229,8 @@ export const authMiddleware: MiddlewareHandler<ServerEnv> = async (c, next) => {
       username: simUser,
       email: simUser,
       roles: [],
+      realmRoles: [],
+      clientRoles: [],
     });
     return next();
   }

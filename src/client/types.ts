@@ -494,7 +494,8 @@ export type CleaningStatus = "scheduled" | "in_progress" | "completed" | "cancel
 
 export interface ChecklistItem {
   id: string;
-  task: string;
+  task?: string;
+  text?: string;
   done: boolean;
 }
 

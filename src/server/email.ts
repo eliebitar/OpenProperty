@@ -894,8 +894,8 @@ export function renderTestEmailHtml(provider: string, fromAddress: string): stri
 
 export interface CleaningEmailParams {
   cleanerName: string;
-  cleanerEmail: string;
-  organizationName: string;
+  cleanerEmail?: string;
+  organizationName?: string;
   propertyName: string;
   propertyAddress?: string;
   unitName: string;
@@ -1118,10 +1118,11 @@ export function renderCleaningReminderEmailHtml(params: CleaningEmailParams): st
 export interface CleaningCompletedEmailParams {
   managerName?: string;
   cleanerName: string;
-  organizationName: string;
+  organizationName?: string;
   unitName: string;
   propertyName: string;
-  completedAt: string;
+  completedAt?: string;
+  completedTime?: string;
   notes?: string;
   issueReported?: string;
   appUrl: string;
@@ -1131,6 +1132,7 @@ export interface CleaningCompletedEmailParams {
  * Render HTML notification to manager when cleaning is completed.
  */
 export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailParams): string {
+  const completedDisplay = params.completedAt || params.completedTime || new Date().toLocaleString();
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Cleaning Completed: ${escapeHtml(params.unitName)}</title></head>
@@ -1149,7 +1151,7 @@ export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailP
     </p>
 
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; font-size: 13px; margin-bottom: 20px;">
-      <p style="margin: 2px 0;"><strong>Completed at:</strong> ${escapeHtml(params.completedAt)}</p>
+      <p style="margin: 2px 0;"><strong>Completed at:</strong> ${escapeHtml(completedDisplay)}</p>
       ${params.notes ? `<p style="margin: 4px 0 0 0; color: #334155;"><strong>Cleaner Notes:</strong> ${escapeHtml(params.notes)}</p>` : ""}
     </div>
 
@@ -1170,8 +1172,9 @@ export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailP
 </html>`;
 }
 
-function escapeHtml(str: string): string {
-  return str
+function escapeHtml(str: string | null | undefined): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Navigation,
   CheckCircle,
+  Send,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
@@ -52,15 +53,15 @@ const ISSUE_PRESETS = [
 ];
 
 const DEFAULT_CHECKLIST_ITEMS: ChecklistItem[] = [
-  { id: "1", text: "Strip bed sheets & pillowcases and wash at 60°C", done: false },
-  { id: "2", text: "Make beds with fresh, crisp sheets, duvet & pillowcases", done: false },
-  { id: "3", text: "Clean & sanitize bathroom (shower, toilet, sink & mirrors)", done: false },
-  { id: "4", text: "Restock fresh bath towels, hand towels & toilet paper", done: false },
-  { id: "5", text: "Clean kitchen counters, sink & empty refrigerator/microwave", done: false },
-  { id: "6", text: "Restock coffee pods, tea bags, sugar & welcome water", done: false },
-  { id: "7", text: "Vacuum rugs and mop all hardwood floors throughout", done: false },
-  { id: "8", text: "Empty all trash bins and put in fresh trash liners", done: false },
-  { id: "9", text: "Lock front door and return keys securely to lockbox", done: false },
+  { id: "1", task: "Strip bed sheets & pillowcases and wash at 60°C", text: "Strip bed sheets & pillowcases and wash at 60°C", done: false },
+  { id: "2", task: "Make beds with fresh, crisp sheets, duvet & pillowcases", text: "Make beds with fresh, crisp sheets, duvet & pillowcases", done: false },
+  { id: "3", task: "Clean & sanitize bathroom (shower, toilet, sink & mirrors)", text: "Clean & sanitize bathroom (shower, toilet, sink & mirrors)", done: false },
+  { id: "4", task: "Restock fresh bath towels, hand towels & toilet paper", text: "Restock fresh bath towels, hand towels & toilet paper", done: false },
+  { id: "5", task: "Clean kitchen counters, sink & empty refrigerator/microwave", text: "Clean kitchen counters, sink & empty refrigerator/microwave", done: false },
+  { id: "6", task: "Restock coffee pods, tea bags, sugar & welcome water", text: "Restock coffee pods, tea bags, sugar & welcome water", done: false },
+  { id: "7", task: "Vacuum rugs and mop all hardwood floors throughout", text: "Vacuum rugs and mop all hardwood floors throughout", done: false },
+  { id: "8", task: "Empty all trash bins and put in fresh trash liners", text: "Empty all trash bins and put in fresh trash liners", done: false },
+  { id: "9", task: "Lock front door and return keys securely to lockbox", text: "Lock front door and return keys securely to lockbox", done: false },
 ];
 
 export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
@@ -132,11 +133,14 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
 
   const parseChecklist = (task: CleaningTask): ChecklistItem[] => {
     if (!task.checklist) return DEFAULT_CHECKLIST_ITEMS;
-    try {
-      const parsed = JSON.parse(task.checklist);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    } catch {
-      /* ignore */
+    if (Array.isArray(task.checklist)) return task.checklist;
+    if (typeof task.checklist === "string") {
+      try {
+        const parsed = JSON.parse(task.checklist);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        /* ignore */
+      }
     }
     return DEFAULT_CHECKLIST_ITEMS;
   };
@@ -689,7 +693,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                               )}
                             </div>
                             <span className={`text-xs sm:text-sm font-medium leading-snug ${item.done ? "line-through opacity-80" : ""}`}>
-                              {item.text}
+                              {item.task || item.text}
                             </span>
                           </button>
                         ))}

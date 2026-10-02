@@ -20,6 +20,7 @@ import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { OrganizationPage } from "./components/organization/organization-page";
 import { CleanerPage } from "./components/cleaner/cleaner-page";
+import { ErrorBoundary } from "./components/error-boundary";
 import { Sparkles } from "lucide-react";
 
 /**
@@ -43,7 +44,7 @@ const PORTFOLIO: AppNavItem[] = [
   { id: "airbnb", label: "Airbnb", href: "/airbnb", icon: "home", color: "pink" },
 ];
 const OPERATIONS: AppNavItem[] = [
-  { id: "cleaner", label: "Cleaning Schedule", href: "/cleaner", icon: "sparkles", color: "teal" },
+  { id: "cleaner", label: "Cleaning Schedule", href: "/cleaner", icon: "sparkles", color: "sky" },
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
 ];
@@ -53,7 +54,7 @@ const ADMIN: AppNavItem[] = [
 ];
 
 const CLEANER_NAV: AppNavItem[] = [
-  { id: "cleaner", label: "My Cleaning Tasks", href: "/cleaner", icon: "sparkles", color: "teal", home: true },
+  { id: "cleaner", label: "My Cleaning Tasks", href: "/cleaner", icon: "sparkles", color: "sky", home: true },
 ];
 
 /** A record page keeps its collection's row lit. */
@@ -146,32 +147,34 @@ function AppContent() {
             </div>
           )}
 
-          {state.loading ? (
-            <div className="flex flex-1 items-center justify-center text-muted-foreground">
-              Loading…
-            </div>
-          ) : isCleaner ? (
-            <CleanerPage navigate={navigate} />
-          ) : (
-            <>
-              {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
-              {route.name === "properties" && <PropertiesList navigate={navigate} />}
-              {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
-              {route.name === "unit" && <UnitPage id={route.id} propertyId={route.propertyId} navigate={navigate} />}
-              {route.name === "tenants" && <TenantsList navigate={navigate} />}
-              {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
-              {route.name === "leases" && <LeasesPage navigate={navigate} />}
-              {route.name === "rent" && <RentPage navigate={navigate} />}
-              {route.name === "airbnb" && <AirbnbPage navigate={navigate} />}
-              {route.name === "cleaner" && <CleanerPage navigate={navigate} />}
-              {route.name === "maintenance" && <MaintenancePage />}
-              {route.name === "organization" && <OrganizationPage navigate={navigate} />}
-              {route.name === "settings" && <SettingsPage />}
-              {route.name === "not-found" && (
-                <Placeholder title="Not found" message="That page doesn't exist." />
-              )}
-            </>
-          )}
+          <ErrorBoundary>
+            {state.loading ? (
+              <div className="flex flex-1 items-center justify-center text-muted-foreground">
+                Loading…
+              </div>
+            ) : isCleaner ? (
+              <CleanerPage navigate={navigate} />
+            ) : (
+              <>
+                {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
+                {route.name === "properties" && <PropertiesList navigate={navigate} />}
+                {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+                {route.name === "unit" && <UnitPage id={route.id} propertyId={route.propertyId} navigate={navigate} />}
+                {route.name === "tenants" && <TenantsList navigate={navigate} />}
+                {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
+                {route.name === "leases" && <LeasesPage navigate={navigate} />}
+                {route.name === "rent" && <RentPage navigate={navigate} />}
+                {route.name === "airbnb" && <AirbnbPage navigate={navigate} />}
+                {route.name === "cleaner" && <CleanerPage navigate={navigate} />}
+                {route.name === "maintenance" && <MaintenancePage />}
+                {route.name === "organization" && <OrganizationPage navigate={navigate} />}
+                {route.name === "settings" && <SettingsPage />}
+                {route.name === "not-found" && (
+                  <Placeholder title="Not found" message="That page doesn't exist." />
+                )}
+              </>
+            )}
+          </ErrorBoundary>
         </main>
         <ErrorBanner />
       </div>

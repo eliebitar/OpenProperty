@@ -308,7 +308,7 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
             <span className="font-medium">Cleaned Today</span>
             <CheckCircle2 className="size-4 text-emerald-500" />
           </div>
-          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.completedTodayCount}</div>
+          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.completedToday}</div>
           <div className="text-[11px] text-muted-foreground">Ready for incoming guests</div>
         </Card>
       </section>

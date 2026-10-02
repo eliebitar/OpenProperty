@@ -691,12 +691,14 @@ async function getCurrentMember(c: Context<Env>, orgId: number): Promise<{ id: n
 
   if (userConds.length === 0) return null;
 
-  return await get<{ id: number; name: string; email: string; role: string }>(
+  const member = await get<{ id: number; name: string; email: string; role: string }>(
     `SELECT id, name, email, role FROM organization_members
      WHERE organization_id = ? AND status = 'active' AND (${userConds.join(" OR ")})
      LIMIT 1`,
     params
   ).catch(() => null);
+
+  return member ?? null;
 }
 
 async function getActiveOrganizationId(c: Context<Env>): Promise<number | null> {
@@ -3413,7 +3415,7 @@ app.put("/api/airbnb/bookings/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [existing.unit_id]);
-  const prop = unit ? await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
+  const prop = unit ? await get<{ id: number; name: string; address: string; organization_id: number }>("SELECT id, name, address, organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
   const allowed = await getUserAllowedOrgIds(c);
   if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
   const role = await getUserOrgRole(c, prop.organization_id);
