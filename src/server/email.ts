@@ -727,7 +727,14 @@ export function renderInviteEmailHtml(params: InviteEmailParams): string {
       ? "Administrator"
       : params.role === "manager"
       ? "Property Manager"
+      : params.role === "cleaner"
+      ? "Turnover Cleaner"
       : "Portfolio Viewer";
+
+  const isCleaner = params.role === "cleaner";
+  const actionUrl = isCleaner && params.appUrl.includes("/organization")
+    ? params.appUrl.replace(/\/organization$/, "/cleaner")
+    : params.appUrl;
 
   const inviterText = params.inviterName
     ? `<strong>${escapeHtml(params.inviterName)}</strong>${
@@ -820,7 +827,7 @@ export function renderInviteEmailHtml(params: InviteEmailParams): string {
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 28px;">
                 <tr>
                   <td align="center">
-                    <a href="${escapeHtml(params.appUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);">
+                    <a href="${escapeHtml(actionUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);">
                       Accept Invitation & Sign In &rarr;
                     </a>
                   </td>
@@ -831,7 +838,7 @@ export function renderInviteEmailHtml(params: InviteEmailParams): string {
                 If the button above does not work, copy and paste this link into your browser:
               </p>
               <p style="margin: 0; font-size: 12px; word-break: break-all; color: #64748b; font-family: monospace; background-color: #f1f5f9; padding: 10px; border-radius: 6px;">
-                ${escapeHtml(params.appUrl)}
+                ${escapeHtml(actionUrl)}
               </p>
             </td>
           </tr>

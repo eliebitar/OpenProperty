@@ -631,6 +631,7 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                 <SelectItem value="owner">Owners</SelectItem>
                 <SelectItem value="admin">Admins</SelectItem>
                 <SelectItem value="manager">Managers</SelectItem>
+                <SelectItem value="cleaner">Cleaners</SelectItem>
                 <SelectItem value="viewer">Viewers</SelectItem>
               </SelectContent>
             </Select>
@@ -799,7 +800,7 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
             Organization Role Permissions
           </h3>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 text-xs">
           <div className="space-y-1 rounded-md border border-border/60 bg-card p-3">
             <div className="flex items-center gap-1.5 font-semibold text-foreground">
               <Crown className="h-3.5 w-3.5 text-amber-500" />
@@ -827,6 +828,16 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
             </div>
             <p className="text-muted-foreground text-[11px] leading-relaxed">
               Handles day-to-day operations: managing units, Airbnb bookings, work orders, turnover cleanings, and tenants.
+            </p>
+          </div>
+
+          <div className="space-y-1 rounded-md border border-border/60 bg-card p-3">
+            <div className="flex items-center gap-1.5 font-semibold text-foreground">
+              <Sparkles className="h-3.5 w-3.5 text-teal-500" />
+              <span>Cleaner</span>
+            </div>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Turnover specialist. Accesses turnover schedules, checklists, and lockbox access codes for assigned Airbnb units.
             </p>
           </div>
 
@@ -900,6 +911,7 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                   <SelectItem value="owner">Owner (Full control over team & properties)</SelectItem>
                   <SelectItem value="admin">Admin (Manage properties, leases, & team)</SelectItem>
                   <SelectItem value="manager">Manager (Manage units, bookings, & work orders)</SelectItem>
+                  <SelectItem value="cleaner">Cleaner (Turnover cleanings & lockbox access)</SelectItem>
                   <SelectItem value="viewer">Viewer (Read-only access)</SelectItem>
                 </SelectContent>
               </Select>
@@ -1032,6 +1044,7 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                   <SelectItem value="owner">Owner</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="cleaner">Cleaner</SelectItem>
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>

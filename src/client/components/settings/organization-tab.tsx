@@ -518,6 +518,7 @@ export function OrganizationTab() {
                 <SelectItem value="owner">Owners</SelectItem>
                 <SelectItem value="admin">Admins</SelectItem>
                 <SelectItem value="manager">Managers</SelectItem>
+                <SelectItem value="cleaner">Cleaners</SelectItem>
                 <SelectItem value="viewer">Viewers</SelectItem>
               </SelectContent>
             </Select>
@@ -684,6 +685,9 @@ export function OrganizationTab() {
             <span className="font-semibold text-foreground">Manager</span>: Manage units, Airbnb bookings, work orders & tenants.
           </div>
           <div>
+            <span className="font-semibold text-foreground">Cleaner</span>: Access turnover cleaning schedule, checklists & lockbox codes.
+          </div>
+          <div>
             <span className="font-semibold text-foreground">Viewer</span>: Read-only access to dashboard and occupancy data.
           </div>
         </div>
@@ -740,6 +744,7 @@ export function OrganizationTab() {
                   <SelectItem value="owner">Owner (Full Control)</SelectItem>
                   <SelectItem value="admin">Admin (Manage properties & leases)</SelectItem>
                   <SelectItem value="manager">Manager (Manage units & bookings)</SelectItem>
+                  <SelectItem value="cleaner">Cleaner (Turnover cleanings & lockbox access)</SelectItem>
                   <SelectItem value="viewer">Viewer (Read-only)</SelectItem>
                 </SelectContent>
               </Select>
@@ -853,6 +858,7 @@ export function OrganizationTab() {
                   <SelectItem value="owner">Owner</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="cleaner">Cleaner</SelectItem>
                   <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
