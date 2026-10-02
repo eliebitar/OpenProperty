@@ -7,6 +7,9 @@ import {
   sendEmail,
   renderInviteEmailHtml,
   renderTestEmailHtml,
+  renderCleaningAssignmentEmailHtml,
+  renderCleaningReminderEmailHtml,
+  renderCleaningCompletedEmailHtml,
   type EmailConfig,
   type EmailProvider,
   type SendEmailResult,
@@ -198,6 +201,47 @@ async function ensureSeeded(): Promise<void> {
     }
     await run("CREATE INDEX IF NOT EXISTS idx_tenants_org ON tenants(organization_id)");
 
+    // Cleaning tasks table
+    await run(`
+      CREATE TABLE IF NOT EXISTS cleaning_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+        booking_id INTEGER REFERENCES airbnb_bookings(id) ON DELETE SET NULL,
+        cleaner_id INTEGER REFERENCES organization_members(id) ON DELETE SET NULL,
+        scheduled_date TEXT NOT NULL,
+        scheduled_time TEXT NOT NULL DEFAULT '11:00',
+        next_check_in_date TEXT,
+        next_check_in_time TEXT DEFAULT '15:00',
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        started_at TEXT,
+        completed_at TEXT,
+        checklist TEXT,
+        notes TEXT,
+        issue_reported TEXT,
+        reminder_sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    await run("CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_org ON cleaning_tasks(organization_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_unit ON cleaning_tasks(unit_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_cleaner ON cleaning_tasks(cleaner_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_status ON cleaning_tasks(status)");
+    await run("CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_date ON cleaning_tasks(scheduled_date)");
+
+    // Add cleaner_id and cleaning_checklist to units table
+    try {
+      await run("ALTER TABLE units ADD COLUMN cleaner_id INTEGER REFERENCES organization_members(id) ON DELETE SET NULL");
+    } catch {
+      // Column already exists
+    }
+    try {
+      await run("ALTER TABLE units ADD COLUMN cleaning_checklist TEXT");
+    } catch {
+      // Column already exists
+    }
+
     // Ensure default organization exists
     const orgCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM organizations");
     let defaultOrgId = 1;
@@ -242,6 +286,11 @@ async function ensureSeeded(): Promise<void> {
     await run(
       `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
        VALUES (?, NULL, 'elie.bitar7@gmail.com', 'Elie Bitar', 'owner', 'active')`,
+      [defaultOrgId]
+    );
+    await run(
+      `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+       VALUES (?, 'cleaner-maria-garcia-id', 'cleaner@openproperty.local', 'Maria Garcia', 'cleaner', 'active')`,
       [defaultOrgId]
     );
 
@@ -373,6 +422,56 @@ async function ensureSeeded(): Promise<void> {
             ],
           );
         }
+      }
+    }
+
+    // Ensure default cleaning checklist and assigned cleaner on Airbnb units
+    const airbnbUnits = await query<{ id: number; property_id: number; cleaner_id: number | null; cleaning_checklist: string | null }>(
+      "SELECT id, property_id, cleaner_id, cleaning_checklist FROM units WHERE type = 'airbnb'"
+    );
+    const mariaMember = await get<{ id: number; organization_id: number }>(
+      "SELECT id, organization_id FROM organization_members WHERE email = 'cleaner@openproperty.local' LIMIT 1"
+    );
+    const defaultChecklistJson = JSON.stringify([
+      { id: "1", text: "Strip bed linens and wash at 60°C", done: false },
+      { id: "2", text: "Make bed with fresh crisp sheets, pillowcases & duvet", done: false },
+      { id: "3", text: "Clean & sanitize bathroom (shower glass, toilet, sink & mirrors)", done: false },
+      { id: "4", text: "Restock fresh bath towels, hand towels & toilet paper (min 2 rolls)", done: false },
+      { id: "5", text: "Clean kitchen counters, sink & empty refrigerator/microwave", done: false },
+      { id: "6", text: "Restock coffee pods, tea bags, sugar & bottled water", done: false },
+      { id: "7", text: "Vacuum all rugs and mop hardwood floors throughout", done: false },
+      { id: "8", text: "Empty all trash bins and replace with fresh liners", done: false },
+      { id: "9", text: "Confirm Wi-Fi card visible, TV remotes working & key in lockbox", done: false }
+    ]);
+
+    for (const au of airbnbUnits) {
+      if (!au.cleaner_id && mariaMember?.id) {
+        await run("UPDATE units SET cleaner_id = ? WHERE id = ?", [mariaMember.id, au.id]);
+      }
+      if (!au.cleaning_checklist) {
+        await run("UPDATE units SET cleaning_checklist = ? WHERE id = ?", [defaultChecklistJson, au.id]);
+      }
+    }
+
+    if (airbnbUnits.length > 0 && mariaMember?.id) {
+      const taskCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM cleaning_tasks WHERE unit_id = ?", [airbnbUnits[0].id]);
+      if ((taskCount?.n ?? 0) === 0) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        await run(
+          `INSERT INTO cleaning_tasks (
+            organization_id, unit_id, cleaner_id, scheduled_date, scheduled_time,
+            next_check_in_date, next_check_in_time, status, checklist, notes
+          ) VALUES (?, ?, ?, ?, '11:00', ?, '15:00', 'scheduled', ?, ?)`,
+          [
+            mariaMember.organization_id || 1,
+            airbnbUnits[0].id,
+            mariaMember.id,
+            todayStr,
+            todayStr,
+            defaultChecklistJson,
+            "Turnover between guests. Please ensure fresh towels and extra espresso pods are stocked in the kitchen."
+          ]
+        );
       }
     }
   } catch {
@@ -558,6 +657,38 @@ async function getUserOrgRole(c: Context<Env>, orgId: number): Promise<string | 
   ).catch(() => null);
 
   return row ? row.role : null;
+}
+
+async function getCurrentMember(c: Context<Env>, orgId: number): Promise<{ id: number; name: string; email: string; role: string } | null> {
+  const user = getCurrentUser(c);
+  if (!user.isAuthenticated) return null;
+
+  const email = user.email?.toLowerCase();
+  const username = user.username?.toLowerCase();
+  const userId = user.userId;
+
+  const userConds: string[] = [];
+  const params: unknown[] = [orgId];
+
+  if (email) {
+    userConds.push("LOWER(email) = ?");
+    params.push(email);
+  } else if (username && username.includes("@")) {
+    userConds.push("LOWER(email) = ?");
+    params.push(username);
+  } else if (userId) {
+    userConds.push("user_id = ?");
+    params.push(userId);
+  }
+
+  if (userConds.length === 0) return null;
+
+  return await get<{ id: number; name: string; email: string; role: string }>(
+    `SELECT id, name, email, role FROM organization_members
+     WHERE organization_id = ? AND status = 'active' AND (${userConds.join(" OR ")})
+     LIMIT 1`,
+    params
+  ).catch(() => null);
 }
 
 async function getActiveOrganizationId(c: Context<Env>): Promise<number | null> {
@@ -764,7 +895,7 @@ app.get("/api/organizations/:id/members", async (c) => {
 const AddMemberInput = z.object({
   email: z.string().email(),
   name: z.string().min(1, "Name is required"),
-  role: z.enum(["owner", "admin", "manager", "viewer"]).default("manager"),
+  role: z.enum(["owner", "admin", "manager", "viewer", "cleaner"]).default("manager"),
   status: z.enum(["active", "invited"]).default("active"),
 });
 
@@ -884,7 +1015,7 @@ app.post("/api/organizations/:id/members/:memberId/resend-invite", async (c) => 
 
 const UpdateMemberInput = z.object({
   name: z.string().optional(),
-  role: z.enum(["owner", "admin", "manager", "viewer"]).optional(),
+  role: z.enum(["owner", "admin", "manager", "viewer", "cleaner"]).optional(),
   status: z.enum(["active", "invited"]).optional(),
 });
 
@@ -1105,6 +1236,8 @@ const UnitInput = z.object({
   airbnb_listing_url: z.string().optional().nullable(),
   airbnb_house_rules: z.string().optional().nullable(),
   airbnb_check_out_instructions: z.string().optional().nullable(),
+  cleaner_id: z.number().int().optional().nullable(),
+  cleaning_checklist: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -1114,6 +1247,8 @@ const UNIT_SELECT = `
     p.color as property_color,
     p.address as property_address,
     p.city as property_city,
+    (SELECT m.name FROM organization_members m WHERE m.id = u.cleaner_id) as cleaner_name,
+    (SELECT m.email FROM organization_members m WHERE m.id = u.cleaner_id) as cleaner_email,
     (SELECT l.id FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_lease_id,
     (SELECT l.primary_tenant_id FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_id,
     (SELECT t.first_name || ' ' || t.last_name FROM leases l LEFT JOIN tenants t ON t.id = l.primary_tenant_id WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_name,
@@ -1179,14 +1314,16 @@ app.post("/api/units", async (c) => {
        property_id, name, type, bedrooms, bathrooms, sqft, market_rent, monthly_operating_cost, status,
        airbnb_nightly_rate, airbnb_cleaning_fee, airbnb_max_guests, airbnb_min_nights,
        airbnb_check_in_time, airbnb_check_out_time, airbnb_wifi_ssid, airbnb_wifi_password,
-       airbnb_lockbox_code, airbnb_listing_url, airbnb_house_rules, airbnb_check_out_instructions, notes
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       airbnb_lockbox_code, airbnb_listing_url, airbnb_house_rules, airbnb_check_out_instructions,
+       cleaner_id, cleaning_checklist, notes
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       d.property_id, d.name, d.type ?? "residential", d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null,
       d.market_rent ?? 0, d.monthly_operating_cost ?? 0, d.status ?? "vacant",
       d.airbnb_nightly_rate ?? 0, d.airbnb_cleaning_fee ?? 0, d.airbnb_max_guests ?? 2, d.airbnb_min_nights ?? 1,
       d.airbnb_check_in_time ?? "15:00", d.airbnb_check_out_time ?? "11:00", d.airbnb_wifi_ssid ?? null, d.airbnb_wifi_password ?? null,
-      d.airbnb_lockbox_code ?? null, d.airbnb_listing_url ?? null, d.airbnb_house_rules ?? null, d.airbnb_check_out_instructions ?? null, d.notes ?? null,
+      d.airbnb_lockbox_code ?? null, d.airbnb_listing_url ?? null, d.airbnb_house_rules ?? null, d.airbnb_check_out_instructions ?? null,
+      d.cleaner_id ?? null, d.cleaning_checklist ?? null, d.notes ?? null,
     ],
   );
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [result.lastInsertRowid]);
@@ -3285,6 +3422,80 @@ app.put("/api/airbnb/bookings/:id", async (c) => {
       await run("UPDATE units SET status = 'occupied' WHERE id = ?", [existing.unit_id]);
     } else if (parsed.data.booking_status === "checked_out") {
       await run("UPDATE units SET status = 'turnover' WHERE id = ?", [existing.unit_id]);
+
+      // Automatically create or verify a cleaning task exists for this turnover
+      const currentBooking = await get<{ check_out_date: string; guest_name: string }>(
+        "SELECT check_out_date, guest_name FROM airbnb_bookings WHERE id = ?",
+        [id]
+      );
+      const unitDetails = await get<{
+        name: string; airbnb_lockbox_code: string | null; airbnb_check_out_time: string | null;
+        airbnb_check_in_time: string | null; cleaner_id: number | null; cleaning_checklist: string | null;
+      }>(
+        "SELECT name, airbnb_lockbox_code, airbnb_check_out_time, airbnb_check_in_time, cleaner_id, cleaning_checklist FROM units WHERE id = ?",
+        [existing.unit_id]
+      );
+
+      if (currentBooking && unitDetails) {
+        const existingTask = await get<{ id: number }>("SELECT id FROM cleaning_tasks WHERE booking_id = ?", [id]);
+        if (!existingTask) {
+          const nextBooking = await get<{ check_in_date: string; check_in_time?: string }>(
+            "SELECT check_in_date FROM airbnb_bookings WHERE unit_id = ? AND check_in_date >= ? AND booking_status != 'cancelled' AND id != ? ORDER BY check_in_date ASC LIMIT 1",
+            [existing.unit_id, currentBooking.check_out_date, id]
+          );
+
+          await run(
+            `INSERT INTO cleaning_tasks (
+              organization_id, unit_id, booking_id, cleaner_id,
+              scheduled_date, scheduled_time, next_check_in_date, next_check_in_time,
+              status, checklist, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)`,
+            [
+              prop.organization_id,
+              existing.unit_id,
+              id,
+              unitDetails.cleaner_id ?? null,
+              currentBooking.check_out_date,
+              unitDetails.airbnb_check_out_time || "11:00",
+              nextBooking?.check_in_date ?? null,
+              unitDetails.airbnb_check_in_time || "15:00",
+              unitDetails.cleaning_checklist || null,
+              `Turnover cleaning after ${currentBooking.guest_name}'s checkout.`,
+            ]
+          );
+
+          if (unitDetails.cleaner_id) {
+            const cleaner = await get<{ name: string; email: string }>(
+              "SELECT name, email FROM organization_members WHERE id = ?",
+              [unitDetails.cleaner_id]
+            );
+            if (cleaner?.email) {
+              const appUrl = (c.req.header("Origin") || "http://localhost:5173") + "/cleaner";
+              const emailCfg = await getEmailConfig(c);
+              const emailHtml = renderCleaningAssignmentEmailHtml({
+                cleanerName: cleaner.name,
+                unitName: unitDetails.name,
+                propertyName: prop.name,
+                propertyAddress: prop.address,
+                scheduledDate: currentBooking.check_out_date,
+                scheduledTime: unitDetails.airbnb_check_out_time || "11:00",
+                nextCheckInDate: nextBooking?.check_in_date ?? undefined,
+                nextCheckInTime: unitDetails.airbnb_check_in_time || "15:00",
+                lockboxCode: unitDetails.airbnb_lockbox_code ?? undefined,
+                notes: `Turnover cleaning after ${currentBooking.guest_name}'s checkout.`,
+                appUrl,
+              });
+
+              sendEmail(emailCfg, {
+                to: cleaner.email,
+                subject: `New Turnover Cleaning Assigned: ${unitDetails.name} on ${currentBooking.check_out_date}`,
+                html: emailHtml,
+                text: `You have been assigned a cleaning task at ${unitDetails.name} on ${currentBooking.check_out_date}. Access Code: ${unitDetails.airbnb_lockbox_code || 'N/A'}. Details: ${appUrl}`,
+              }).catch(() => {});
+            }
+          }
+        }
+      }
     }
   }
 
@@ -3309,7 +3520,7 @@ app.delete("/api/airbnb/bookings/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// One-click action to schedule a turnover cleaning work order for this checkout
+// One-click action to schedule a turnover cleaning task and work order for this checkout
 app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
@@ -3320,19 +3531,90 @@ app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
   if (!booking) return c.json({ error: "Booking not found" }, 404);
 
   const unit = await get<{
-    id: number; property_id: number; name: string; airbnb_cleaning_fee: number; airbnb_lockbox_code: string | null; airbnb_check_out_time: string | null;
-  }>("SELECT id, property_id, name, airbnb_cleaning_fee, airbnb_lockbox_code, airbnb_check_out_time FROM units WHERE id = ?", [booking.unit_id]);
+    id: number; property_id: number; name: string; airbnb_cleaning_fee: number;
+    airbnb_lockbox_code: string | null; airbnb_check_out_time: string | null;
+    airbnb_check_in_time: string | null; cleaner_id: number | null; cleaning_checklist: string | null;
+  }>(
+    "SELECT id, property_id, name, airbnb_cleaning_fee, airbnb_lockbox_code, airbnb_check_out_time, airbnb_check_in_time, cleaner_id, cleaning_checklist FROM units WHERE id = ?",
+    [booking.unit_id]
+  );
   if (!unit) return c.json({ error: "Unit not found" }, 404);
 
-  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]);
+  const prop = await get<{ id: number; name: string; address: string; organization_id: number }>(
+    "SELECT id, name, address, organization_id FROM properties WHERE id = ?",
+    [unit.property_id]
+  );
   const allowed = await getUserAllowedOrgIds(c);
   if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
   const role = await getUserOrgRole(c, prop.organization_id);
   if (role === "viewer") return c.json({ error: "Viewers cannot schedule cleanings" }, 403);
 
-  // Find a cleaning vendor if available
-  const vendor = await get<{ id: number }>("SELECT id FROM vendors WHERE category = 'cleaning' LIMIT 1");
+  // Set unit status to turnover
+  await run("UPDATE units SET status = 'turnover' WHERE id = ?", [unit.id]);
 
+  // Create or retrieve cleaning task
+  let cleaningTask = await get("SELECT * FROM cleaning_tasks WHERE booking_id = ?", [booking.id]);
+  if (!cleaningTask) {
+    const nextBooking = await get<{ check_in_date: string }>(
+      "SELECT check_in_date FROM airbnb_bookings WHERE unit_id = ? AND check_in_date >= ? AND booking_status != 'cancelled' AND id != ? ORDER BY check_in_date ASC LIMIT 1",
+      [unit.id, booking.check_out_date, booking.id]
+    );
+
+    const taskResult = await run(
+      `INSERT INTO cleaning_tasks (
+        organization_id, unit_id, booking_id, cleaner_id,
+        scheduled_date, scheduled_time, next_check_in_date, next_check_in_time,
+        status, checklist, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)`,
+      [
+        prop.organization_id,
+        unit.id,
+        booking.id,
+        unit.cleaner_id ?? null,
+        booking.check_out_date,
+        unit.airbnb_check_out_time || "11:00",
+        nextBooking?.check_in_date ?? null,
+        unit.airbnb_check_in_time || "15:00",
+        unit.cleaning_checklist || null,
+        `Turnover cleaning after ${booking.guest_name}'s checkout.`,
+      ]
+    );
+    cleaningTask = await get("SELECT * FROM cleaning_tasks WHERE id = ?", [taskResult.lastInsertRowid]);
+
+    if (unit.cleaner_id) {
+      const cleaner = await get<{ name: string; email: string }>(
+        "SELECT name, email FROM organization_members WHERE id = ?",
+        [unit.cleaner_id]
+      );
+      if (cleaner?.email) {
+        const appUrl = (c.req.header("Origin") || "http://localhost:5173") + "/cleaner";
+        const emailCfg = await getEmailConfig(c);
+        const emailHtml = renderCleaningAssignmentEmailHtml({
+          cleanerName: cleaner.name,
+          unitName: unit.name,
+          propertyName: prop.name,
+          propertyAddress: prop.address,
+          scheduledDate: booking.check_out_date,
+          scheduledTime: unit.airbnb_check_out_time || "11:00",
+          nextCheckInDate: nextBooking?.check_in_date ?? undefined,
+          nextCheckInTime: unit.airbnb_check_in_time || "15:00",
+          lockboxCode: unit.airbnb_lockbox_code ?? undefined,
+          notes: `Turnover cleaning after ${booking.guest_name}'s checkout.`,
+          appUrl,
+        });
+
+        sendEmail(emailCfg, {
+          to: cleaner.email,
+          subject: `New Turnover Cleaning Assigned: ${unit.name} on ${booking.check_out_date}`,
+          html: emailHtml,
+          text: `You have been assigned a cleaning task at ${unit.name} on ${booking.check_out_date}. Access Code: ${unit.airbnb_lockbox_code || 'N/A'}. Details: ${appUrl}`,
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // Also create a vendor work order if cleaning vendor exists
+  const vendor = await get<{ id: number }>("SELECT id FROM vendors WHERE category = 'cleaning' LIMIT 1");
   const title = `Turnover Cleaning - ${unit.name} (Guest: ${booking.guest_name})`;
   const cost = booking.cleaning_fee || unit.airbnb_cleaning_fee || 50;
   const description = `Turnover cleaning and linen change following guest check-out on ${booking.check_out_date} at ${unit.airbnb_check_out_time || '11:00'}. Unit must be prepared for incoming guests.`;
@@ -3356,7 +3638,7 @@ app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
   );
 
   const wo = await get("SELECT * FROM work_orders WHERE id = ?", [result.lastInsertRowid]);
-  return c.json({ ok: true, work_order: wo }, 201);
+  return c.json({ ok: true, work_order: wo, cleaning_task: cleaningTask }, 201);
 });
 
 // Comprehensive Airbnb Analytics
@@ -3490,6 +3772,431 @@ app.get("/api/airbnb/analytics", async (c) => {
     revenue_by_month: revenueByMonth,
     units_summary: unitsSummary,
   });
+});
+
+// ── Cleaners and Cleaning Tasks ─────────────────────────────────────
+
+const CLEANING_TASK_SELECT = `
+  SELECT
+    ct.*,
+    u.name as unit_name,
+    u.type as unit_type,
+    u.airbnb_lockbox_code,
+    u.airbnb_check_in_time as unit_default_check_in_time,
+    u.airbnb_check_out_time as unit_default_check_out_time,
+    u.airbnb_wifi_ssid,
+    u.airbnb_wifi_password,
+    u.airbnb_house_rules,
+    u.airbnb_check_out_instructions,
+    p.id as property_id,
+    p.name as property_name,
+    p.address as property_address,
+    p.city as property_city,
+    p.color as property_color,
+    m.name as cleaner_name,
+    m.email as cleaner_email,
+    b.guest_name as booking_guest_name,
+    b.check_in_date as booking_check_in_date,
+    b.check_out_date as booking_check_out_date,
+    b.num_guests as booking_num_guests
+  FROM cleaning_tasks ct
+  JOIN units u ON u.id = ct.unit_id
+  JOIN properties p ON p.id = u.property_id
+  LEFT JOIN organization_members m ON m.id = ct.cleaner_id
+  LEFT JOIN airbnb_bookings b ON b.id = ct.booking_id
+`;
+
+app.get("/api/cleaners", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ cleaners: [] });
+
+  const cleaners = await query(
+    `SELECT id, organization_id, user_id, email, name, role, status
+     FROM organization_members
+     WHERE organization_id = ? AND status = 'active' AND (role = 'cleaner' OR role = 'manager')
+     ORDER BY CASE role WHEN 'cleaner' THEN 1 ELSE 2 END, name ASC`,
+    [activeOrgId]
+  );
+  return c.json({ cleaners });
+});
+
+app.get("/api/cleaning-tasks", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ tasks: [] });
+
+  const role = await getUserOrgRole(c, activeOrgId);
+  const currentMember = await getCurrentMember(c, activeOrgId);
+
+  const where: string[] = ["ct.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
+
+  // If cleaner, automatically filter tasks to their own or unassigned tasks
+  if (role === "cleaner" && currentMember) {
+    where.push("(ct.cleaner_id = ? OR ct.cleaner_id IS NULL)");
+    params.push(currentMember.id);
+  } else {
+    const cleanerIdParam = intParam(c.req.query("cleaner_id"));
+    if (cleanerIdParam) {
+      where.push("ct.cleaner_id = ?");
+      params.push(cleanerIdParam);
+    }
+  }
+
+  const unitIdParam = intParam(c.req.query("unit_id"));
+  if (unitIdParam) {
+    where.push("ct.unit_id = ?");
+    params.push(unitIdParam);
+  }
+
+  const statusParam = c.req.query("status");
+  if (statusParam) {
+    where.push("ct.status = ?");
+    params.push(statusParam);
+  }
+
+  const fromDate = c.req.query("from_date");
+  if (fromDate) {
+    where.push("ct.scheduled_date >= ?");
+    params.push(fromDate);
+  }
+
+  const toDate = c.req.query("to_date");
+  if (toDate) {
+    where.push("ct.scheduled_date <= ?");
+    params.push(toDate);
+  }
+
+  const sql = `
+    ${CLEANING_TASK_SELECT}
+    WHERE ${where.join(" AND ")}
+    ORDER BY
+      CASE ct.status
+        WHEN 'in_progress' THEN 1
+        WHEN 'scheduled' THEN 2
+        WHEN 'completed' THEN 3
+        ELSE 4
+      END,
+      ct.scheduled_date ASC,
+      ct.scheduled_time ASC
+  `;
+
+  const tasks = await query(sql, params);
+  return c.json({ tasks });
+});
+
+app.get("/api/cleaning-tasks/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const task = await get(
+    `${CLEANING_TASK_SELECT} WHERE ct.id = ? AND ct.organization_id IN (${placeholders})`,
+    [id, ...allowedOrgIds]
+  );
+  if (!task) return c.json({ error: "Task not found" }, 404);
+  return c.json({ task });
+});
+
+const CleaningTaskInput = z.object({
+  unit_id: z.number().int(),
+  booking_id: z.number().int().optional().nullable(),
+  cleaner_id: z.number().int().optional().nullable(),
+  scheduled_date: z.string().min(10),
+  scheduled_time: z.string().default("11:00"),
+  next_check_in_date: z.string().optional().nullable(),
+  next_check_in_time: z.string().default("15:00").optional().nullable(),
+  checklist: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+app.post("/api/cleaning-tasks", async (c) => {
+  const parsed = await parseJson(c, CleaningTaskInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+
+  const unit = await get<{
+    id: number; name: string; property_id: number; airbnb_lockbox_code: string | null;
+    cleaner_id: number | null; cleaning_checklist: string | null;
+  }>(
+    "SELECT id, name, property_id, airbnb_lockbox_code, cleaner_id, cleaning_checklist FROM units WHERE id = ?",
+    [d.unit_id]
+  );
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const prop = await get<{ id: number; name: string; address: string; organization_id: number }>(
+    "SELECT id, name, address, organization_id FROM properties WHERE id = ?",
+    [unit.property_id]
+  );
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(prop.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer" || role === "cleaner") {
+    return c.json({ error: "Viewers and cleaners cannot schedule new cleaning tasks" }, 403);
+  }
+
+  const cleanerId = d.cleaner_id ?? unit.cleaner_id;
+  const checklist = d.checklist || unit.cleaning_checklist || JSON.stringify([
+    { id: "1", text: "Strip bed linens and wash at 60°C", done: false },
+    { id: "2", text: "Make bed with fresh crisp sheets, pillowcases & duvet", done: false },
+    { id: "3", text: "Clean & sanitize bathroom (shower, toilet, sink & mirrors)", done: false },
+    { id: "4", text: "Restock fresh bath towels, hand towels & toilet paper", done: false },
+    { id: "5", text: "Clean kitchen counters, sink & empty refrigerator/microwave", done: false },
+    { id: "6", text: "Restock coffee pods, tea bags, sugar & welcome water", done: false },
+    { id: "7", text: "Vacuum all rugs and mop hardwood floors throughout", done: false },
+    { id: "8", text: "Empty all trash bins and replace with fresh liners", done: false },
+    { id: "9", text: "Confirm Wi-Fi card visible, TV remotes working & key in lockbox", done: false }
+  ]);
+
+  const result = await run(
+    `INSERT INTO cleaning_tasks (
+      organization_id, unit_id, booking_id, cleaner_id,
+      scheduled_date, scheduled_time, next_check_in_date, next_check_in_time,
+      status, checklist, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)`,
+    [
+      prop.organization_id,
+      unit.id,
+      d.booking_id ?? null,
+      cleanerId ?? null,
+      d.scheduled_date,
+      d.scheduled_time || "11:00",
+      d.next_check_in_date ?? null,
+      d.next_check_in_time || "15:00",
+      checklist,
+      d.notes ?? null,
+    ]
+  );
+
+  const newTaskId = Number(result.lastInsertRowid);
+  const task = await get(`${CLEANING_TASK_SELECT} WHERE ct.id = ?`, [newTaskId]);
+
+  if (cleanerId) {
+    const cleaner = await get<{ name: string; email: string }>(
+      "SELECT name, email FROM organization_members WHERE id = ?",
+      [cleanerId]
+    );
+    if (cleaner && cleaner.email) {
+      try {
+        const appUrl = (c.req.header("Origin") || "http://localhost:5173") + "/cleaner";
+        const emailCfg = await getEmailConfig(c);
+        const emailHtml = renderCleaningAssignmentEmailHtml({
+          cleanerName: cleaner.name,
+          unitName: unit.name,
+          propertyName: prop.name,
+          propertyAddress: prop.address,
+          scheduledDate: d.scheduled_date,
+          scheduledTime: d.scheduled_time || "11:00",
+          nextCheckInDate: d.next_check_in_date ?? undefined,
+          nextCheckInTime: d.next_check_in_time || "15:00",
+          lockboxCode: unit.airbnb_lockbox_code ?? undefined,
+          notes: d.notes ?? undefined,
+          appUrl,
+        });
+
+        await sendEmail(emailCfg, {
+          to: cleaner.email,
+          subject: `New Turnover Cleaning Assigned: ${unit.name} on ${d.scheduled_date}`,
+          html: emailHtml,
+          text: `You have been assigned a cleaning task at ${unit.name} (${prop.name}) on ${d.scheduled_date} at ${d.scheduled_time || '11:00'}. Access Code: ${unit.airbnb_lockbox_code || 'N/A'}. Details: ${appUrl}`,
+        });
+      } catch (err) {
+        console.error("Failed to send cleaner assignment email:", err);
+      }
+    }
+  }
+
+  return c.json({ task }, 201);
+});
+
+const UpdateCleaningTaskInput = z.object({
+  cleaner_id: z.number().int().optional().nullable(),
+  scheduled_date: z.string().optional(),
+  scheduled_time: z.string().optional(),
+  next_check_in_date: z.string().optional().nullable(),
+  next_check_in_time: z.string().optional().nullable(),
+  status: z.enum(["scheduled", "in_progress", "completed", "cancelled"]).optional(),
+  checklist: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  issue_reported: z.string().optional().nullable(),
+});
+
+app.put("/api/cleaning-tasks/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{
+    id: number; organization_id: number; unit_id: number; cleaner_id: number | null;
+    status: string; scheduled_date: string; scheduled_time: string;
+  }>("SELECT id, organization_id, unit_id, cleaner_id, status, scheduled_date, scheduled_time FROM cleaning_tasks WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Task not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(existing.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const parsed = await parseJson(c, UpdateCleaningTaskInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const data = parsed.data;
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (data.cleaner_id !== undefined) { sets.push("cleaner_id = ?"); params.push(data.cleaner_id); }
+  if (data.scheduled_date !== undefined) { sets.push("scheduled_date = ?"); params.push(data.scheduled_date); }
+  if (data.scheduled_time !== undefined) { sets.push("scheduled_time = ?"); params.push(data.scheduled_time); }
+  if (data.next_check_in_date !== undefined) { sets.push("next_check_in_date = ?"); params.push(data.next_check_in_date); }
+  if (data.next_check_in_time !== undefined) { sets.push("next_check_in_time = ?"); params.push(data.next_check_in_time); }
+  if (data.checklist !== undefined) { sets.push("checklist = ?"); params.push(data.checklist); }
+  if (data.notes !== undefined) { sets.push("notes = ?"); params.push(data.notes); }
+  if (data.issue_reported !== undefined) { sets.push("issue_reported = ?"); params.push(data.issue_reported); }
+
+  if (data.status !== undefined) {
+    sets.push("status = ?");
+    params.push(data.status);
+
+    if (data.status === "in_progress") {
+      sets.push("started_at = COALESCE(started_at, datetime('now'))");
+      await run("UPDATE units SET status = 'turnover' WHERE id = ?", [existing.unit_id]);
+    } else if (data.status === "completed") {
+      sets.push("completed_at = datetime('now')");
+      // Turn unit status to vacant and ready for incoming guests
+      await run("UPDATE units SET status = 'vacant' WHERE id = ?", [existing.unit_id]);
+    }
+  }
+
+  sets.push("updated_at = datetime('now')");
+  params.push(id);
+
+  await run(`UPDATE cleaning_tasks SET ${sets.join(", ")} WHERE id = ?`, params);
+
+  const updatedTask = await get(`${CLEANING_TASK_SELECT} WHERE ct.id = ?`, [id]);
+
+  // If marked completed, notify managers via email
+  if (data.status === "completed" && existing.status !== "completed") {
+    try {
+      const unit = await get<{ name: string; property_id: number }>("SELECT name, property_id FROM units WHERE id = ?", [existing.unit_id]);
+      const prop = unit ? await get<{ name: string }>("SELECT name FROM properties WHERE id = ?", [unit.property_id]) : null;
+      const cleaner = existing.cleaner_id ? await get<{ name: string }>("SELECT name FROM organization_members WHERE id = ?", [existing.cleaner_id]) : null;
+      const managers = await query<{ email: string }>(
+        "SELECT email FROM organization_members WHERE organization_id = ? AND role IN ('owner', 'admin', 'manager') AND email != ''",
+        [existing.organization_id]
+      );
+      const emailCfg = await getEmailConfig(c);
+      const appUrl = (c.req.header("Origin") || "http://localhost:5173") + "/airbnb";
+
+      const html = renderCleaningCompletedEmailHtml({
+        cleanerName: cleaner?.name || "Cleaner",
+        unitName: unit?.name || "Unit",
+        propertyName: prop?.name || "Property",
+        completedTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        notes: data.notes || undefined,
+        issueReported: data.issue_reported || undefined,
+        appUrl,
+      });
+
+      for (const m of managers) {
+        sendEmail(emailCfg, {
+          to: m.email,
+          subject: `✨ Unit Ready: ${unit?.name || 'Unit'} has been cleaned!`,
+          html,
+          text: `${unit?.name} (${prop?.name}) was cleaned by ${cleaner?.name || 'cleaner'} and is ready for guests.`,
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error("Failed to dispatch cleaning completion notification:", e);
+    }
+  }
+
+  return c.json({ task: updatedTask });
+});
+
+app.post("/api/cleaning-tasks/:id/send-reminder", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const task = await get<{
+    id: number; organization_id: number; unit_id: number; cleaner_id: number | null;
+    scheduled_date: string; scheduled_time: string; notes: string | null;
+  }>("SELECT id, organization_id, unit_id, cleaner_id, scheduled_date, scheduled_time, notes FROM cleaning_tasks WHERE id = ?", [id]);
+  if (!task) return c.json({ error: "Task not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(task.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  if (!task.cleaner_id) {
+    return c.json({ error: "No cleaner is assigned to this task" }, 400);
+  }
+
+  const cleaner = await get<{ name: string; email: string }>(
+    "SELECT name, email FROM organization_members WHERE id = ?",
+    [task.cleaner_id]
+  );
+  if (!cleaner || !cleaner.email) {
+    return c.json({ error: "Assigned cleaner has no email address" }, 400);
+  }
+
+  const unit = await get<{ name: string; property_id: number; airbnb_lockbox_code: string | null }>(
+    "SELECT name, property_id, airbnb_lockbox_code FROM units WHERE id = ?",
+    [task.unit_id]
+  );
+  const prop = unit ? await get<{ name: string; address: string }>("SELECT name, address FROM properties WHERE id = ?", [unit.property_id]) : null;
+
+  const appUrl = (c.req.header("Origin") || "http://localhost:5173") + "/cleaner";
+  const emailCfg = await getEmailConfig(c);
+  const html = renderCleaningReminderEmailHtml({
+    cleanerName: cleaner.name,
+    unitName: unit?.name || "Unit",
+    propertyName: prop?.name || "Property",
+    propertyAddress: prop?.address || "",
+    scheduledDate: task.scheduled_date,
+    scheduledTime: task.scheduled_time,
+    lockboxCode: unit?.airbnb_lockbox_code || undefined,
+    notes: task.notes || undefined,
+    appUrl,
+  });
+
+  const res = await sendEmail(emailCfg, {
+    to: cleaner.email,
+    subject: `⏰ Turnover Reminder: ${unit?.name || 'Unit'} on ${task.scheduled_date}`,
+    html,
+    text: `Reminder: you have a turnover cleaning scheduled at ${unit?.name} (${prop?.name}) on ${task.scheduled_date} at ${task.scheduled_time}. Key code: ${unit?.airbnb_lockbox_code || 'N/A'}. Details: ${appUrl}`,
+  });
+
+  await run("UPDATE cleaning_tasks SET reminder_sent_at = datetime('now') WHERE id = ?", [id]);
+
+  return c.json({ ok: res.ok, email_result: res, reminder_sent_at: new Date().toISOString() });
+});
+
+app.delete("/api/cleaning-tasks/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const task = await get<{ organization_id: number }>("SELECT organization_id FROM cleaning_tasks WHERE id = ?", [id]);
+  if (!task) return c.json({ error: "Task not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(task.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, task.organization_id);
+  if (role === "viewer" || role === "cleaner") {
+    return c.json({ error: "Forbidden: only owners, admins, or managers can delete tasks" }, 403);
+  }
+
+  await run("DELETE FROM cleaning_tasks WHERE id = ?", [id]);
+  return c.json({ ok: true });
 });
 
 // ── Health ─────────────────────────────────────────────────────────

@@ -883,6 +883,286 @@ export function renderTestEmailHtml(provider: string, fromAddress: string): stri
 </html>`;
 }
 
+// ── Cleaning & Turnover Email Templates ──────────────────────────────
+
+export interface CleaningEmailParams {
+  cleanerName: string;
+  cleanerEmail: string;
+  organizationName: string;
+  propertyName: string;
+  propertyAddress?: string;
+  unitName: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  nextCheckInDate?: string;
+  nextCheckInTime?: string;
+  lockboxCode?: string;
+  checklist?: string[];
+  notes?: string;
+  appUrl: string;
+}
+
+/**
+ * Render HTML email for when a cleaner is assigned to a turnover task.
+ */
+export function renderCleaningAssignmentEmailHtml(params: CleaningEmailParams): string {
+  const windowText = params.nextCheckInDate
+    ? `Guest departs at <strong>${escapeHtml(params.scheduledTime)}</strong>. Next guest check-in: <strong>${escapeHtml(
+        params.nextCheckInDate
+      )} at ${escapeHtml(params.nextCheckInTime || "15:00")}</strong>.`
+    : `Guest departs at <strong>${escapeHtml(params.scheduledTime)}</strong>.`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>New Cleaning Assignment: ${escapeHtml(params.unitName)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%); height: 8px;"></td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 36px 16px 36px;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background-color: #f0fdfa; border-radius: 10px; width: 36px; height: 36px; text-align: center; vertical-align: middle; border: 1px solid #99f6e4;">
+                    <span style="font-size: 20px;">🧹</span>
+                  </td>
+                  <td style="padding-left: 12px;">
+                    <span style="font-size: 17px; font-weight: 700; color: #0f172a;">${escapeHtml(params.organizationName)}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 36px 32px 36px;">
+              <h1 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 700; color: #0f172a;">
+                New Turnover Cleaning Scheduled
+              </h1>
+              <p style="margin: 0 0 20px 0; font-size: 15px; color: #475569; line-height: 1.5;">
+                Hello <strong>${escapeHtml(params.cleanerName)}</strong>, you have been assigned to prepare <strong>${escapeHtml(params.unitName)}</strong> for the next arriving guest.
+              </p>
+
+              <!-- Main Task Card -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 24px;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0 0 4px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; color: #64748b;">
+                      Unit & Property
+                    </p>
+                    <p style="margin: 0 0 14px 0; font-size: 16px; font-weight: 700; color: #0f172a;">
+                      ${escapeHtml(params.unitName)} &bull; ${escapeHtml(params.propertyName)}
+                    </p>
+
+                    ${params.propertyAddress ? `
+                    <p style="margin: 0 0 4px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; color: #64748b;">
+                      Address
+                    </p>
+                    <p style="margin: 0 0 14px 0; font-size: 14px; color: #334155;">
+                      📍 ${escapeHtml(params.propertyAddress)}
+                    </p>
+                    ` : ""}
+
+                    <p style="margin: 0 0 4px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; color: #64748b;">
+                      Date & Turnover Window
+                    </p>
+                    <p style="margin: 0 0 14px 0; font-size: 15px; color: #0d9488; font-weight: 600;">
+                      📅 ${escapeHtml(params.scheduledDate)} at ${escapeHtml(params.scheduledTime)}
+                    </p>
+                    <p style="margin: 0 0 14px 0; font-size: 13px; color: #64748b; line-height: 1.4;">
+                      ${windowText}
+                    </p>
+
+                    ${params.lockboxCode ? `
+                    <div style="background-color: #ecfdf5; border: 1px dashed #10b981; border-radius: 8px; padding: 12px 16px; margin-top: 8px;">
+                      <span style="font-size: 12px; color: #047857; font-weight: 600; text-transform: uppercase;">🔑 Key Access / Lockbox Code:</span>
+                      <div style="font-size: 20px; font-weight: 800; color: #065f46; letter-spacing: 0.1em; margin-top: 4px;">
+                        ${escapeHtml(params.lockboxCode)}
+                      </div>
+                    </div>
+                    ` : ""}
+
+                    ${params.notes ? `
+                    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                      <span style="font-size: 12px; color: #64748b; font-weight: 600;">Special Instructions:</span>
+                      <p style="margin: 4px 0 0 0; font-size: 13px; color: #334155; line-height: 1.4;">
+                        ${escapeHtml(params.notes)}
+                      </p>
+                    </div>
+                    ` : ""}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(params.appUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 12px rgba(13, 148, 136, 0.25);">
+                      Open Cleaning Checklist &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0; font-size: 12px; text-align: center; color: #94a3b8;">
+                Tap above to view instructions, mark items complete, and notify the team when finished.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Render HTML email reminder for upcoming cleaning tasks.
+ */
+export function renderCleaningReminderEmailHtml(params: CleaningEmailParams): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cleaning Reminder: ${escapeHtml(params.unitName)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%); height: 8px;"></td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 36px 16px 36px;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background-color: #fef3c7; border-radius: 10px; width: 36px; height: 36px; text-align: center; vertical-align: middle; border: 1px solid #fde68a;">
+                    <span style="font-size: 20px;">⏰</span>
+                  </td>
+                  <td style="padding-left: 12px;">
+                    <span style="font-size: 17px; font-weight: 700; color: #0f172a;">Turnover Reminder</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 36px 32px 36px;">
+              <h1 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 700; color: #0f172a;">
+                Cleaning Due: ${escapeHtml(params.unitName)}
+              </h1>
+              <p style="margin: 0 0 20px 0; font-size: 15px; color: #475569; line-height: 1.5;">
+                Hello <strong>${escapeHtml(params.cleanerName)}</strong>, this is a reminder for your turnover cleaning scheduled for <strong>${escapeHtml(
+    params.scheduledDate
+  )} at ${escapeHtml(params.scheduledTime)}</strong>.
+              </p>
+
+              <!-- Highlight Box -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #fffbeb; border-radius: 12px; border: 1px solid #fef3c7; margin-bottom: 24px;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 700; color: #92400e;">
+                      🏢 ${escapeHtml(params.unitName)} (${escapeHtml(params.propertyName)})
+                    </p>
+                    ${params.propertyAddress ? `<p style="margin: 0 0 10px 0; font-size: 13px; color: #b45309;">📍 ${escapeHtml(params.propertyAddress)}</p>` : ""}
+
+                    ${params.lockboxCode ? `
+                    <div style="background-color: #ffffff; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-top: 10px;">
+                      <div style="font-size: 12px; color: #92400e; font-weight: 600;">KEY LOCKBOX ACCESS CODE:</div>
+                      <div style="font-size: 22px; font-weight: 800; color: #78350f; letter-spacing: 0.1em; margin-top: 4px;">
+                        ${escapeHtml(params.lockboxCode)}
+                      </div>
+                    </div>
+                    ` : ""}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 20px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(params.appUrl)}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%); color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);">
+                      Open Cleaning Task &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export interface CleaningCompletedEmailParams {
+  managerName?: string;
+  cleanerName: string;
+  organizationName: string;
+  unitName: string;
+  propertyName: string;
+  completedAt: string;
+  notes?: string;
+  issueReported?: string;
+  appUrl: string;
+}
+
+/**
+ * Render HTML notification to manager when cleaning is completed.
+ */
+export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailParams): string {
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Cleaning Completed: ${escapeHtml(params.unitName)}</title></head>
+<body style="font-family: -apple-system, sans-serif; background: #f8fafc; padding: 32px; color: #0f172a;">
+  <div style="max-width: 540px; margin: auto; background: #ffffff; padding: 32px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 2px 10px rgba(0,0,0,0.04);">
+    <div style="display: inline-block; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px; margin-bottom: 12px;">
+      ✓ READY FOR GUESTS
+    </div>
+    <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 20px;">
+      ${escapeHtml(params.unitName)} is Clean & Prepared!
+    </h2>
+    <p style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0 0 16px 0;">
+      <strong>${escapeHtml(params.cleanerName)}</strong> has marked the turnover cleaning as completed for <strong>${escapeHtml(
+    params.unitName
+  )}</strong> (${escapeHtml(params.propertyName)}).
+    </p>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; font-size: 13px; margin-bottom: 20px;">
+      <p style="margin: 2px 0;"><strong>Completed at:</strong> ${escapeHtml(params.completedAt)}</p>
+      ${params.notes ? `<p style="margin: 4px 0 0 0; color: #334155;"><strong>Cleaner Notes:</strong> ${escapeHtml(params.notes)}</p>` : ""}
+    </div>
+
+    ${params.issueReported ? `
+    <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 14px; font-size: 13px; margin-bottom: 20px; color: #9f1239;">
+      <strong>⚠️ Issue Reported by Cleaner:</strong>
+      <p style="margin: 4px 0 0 0;">${escapeHtml(params.issueReported)}</p>
+    </div>
+    ` : ""}
+
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${escapeHtml(params.appUrl)}" style="background: #0f172a; color: #ffffff; padding: 10px 24px; border-radius: 8px; font-size: 13px; text-decoration: none; font-weight: 600;">
+        View Unit in Dashboard
+      </a>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")

@@ -284,3 +284,32 @@ CREATE TABLE IF NOT EXISTS email_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_email_logs_created ON email_logs(created_at DESC);
+
+-- ── Cleaning Tasks & Turnover Schedules ──────────────────────────────
+CREATE TABLE IF NOT EXISTS cleaning_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  booking_id INTEGER REFERENCES airbnb_bookings(id) ON DELETE SET NULL,
+  cleaner_id INTEGER REFERENCES organization_members(id) ON DELETE SET NULL,
+  scheduled_date TEXT NOT NULL,         -- 'YYYY-MM-DD' (guest checkout date)
+  scheduled_time TEXT NOT NULL DEFAULT '11:00',
+  next_check_in_date TEXT,             -- 'YYYY-MM-DD'
+  next_check_in_time TEXT DEFAULT '15:00',
+  status TEXT NOT NULL DEFAULT 'scheduled', -- 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
+  started_at TEXT,
+  completed_at TEXT,
+  checklist TEXT,                      -- JSON array e.g. [{"id":"1","task":"Linens washed","done":true}]
+  notes TEXT,                          -- Special instructions or turnover notes
+  issue_reported TEXT,                 -- Damage or maintenance report by cleaner
+  reminder_sent_at TEXT,               -- Timestamp when email reminder was sent
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_org ON cleaning_tasks(organization_id);
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_cleaner ON cleaning_tasks(cleaner_id);
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_unit ON cleaning_tasks(unit_id);
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_date ON cleaning_tasks(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_status ON cleaning_tasks(status);
+

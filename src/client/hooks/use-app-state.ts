@@ -23,6 +23,9 @@ import type {
   OrganizationMember,
   NewOrganization,
   InviteMemberInput,
+  CleaningTask,
+  CreateCleaningTaskInput,
+  UpdateCleaningTaskInput,
 } from "../types";
 
 export interface AppSettings {
@@ -346,6 +349,65 @@ export function useAppState() {
     return res.work_order;
   }, []);
 
+  // Cleaners & Turnover Cleaning Tasks ───────────────────────────
+
+  const listCleaners = useCallback(async (): Promise<OrganizationMember[]> => {
+    const res = await api<{ cleaners: OrganizationMember[] }>("GET", "/api/cleaners");
+    return res.cleaners;
+  }, []);
+
+  const listCleaningTasks = useCallback(async (params?: {
+    unit_id?: number;
+    cleaner_id?: number;
+    status?: string;
+    from_date?: string;
+    to_date?: string;
+  }): Promise<CleaningTask[]> => {
+    const qs = new URLSearchParams();
+    if (params?.unit_id) qs.set("unit_id", String(params.unit_id));
+    if (params?.cleaner_id) qs.set("cleaner_id", String(params.cleaner_id));
+    if (params?.status) qs.set("status", params.status);
+    if (params?.from_date) qs.set("from_date", params.from_date);
+    if (params?.to_date) qs.set("to_date", params.to_date);
+    const path = qs.toString() ? `/api/cleaning-tasks?${qs.toString()}` : "/api/cleaning-tasks";
+    const res = await api<{ tasks: CleaningTask[] }>("GET", path);
+    return res.tasks;
+  }, []);
+
+  const getCleaningTask = useCallback(async (id: number): Promise<CleaningTask> => {
+    const res = await api<{ task: CleaningTask }>("GET", `/api/cleaning-tasks/${id}`);
+    return res.task;
+  }, []);
+
+  const createCleaningTask = useCallback(async (data: CreateCleaningTaskInput): Promise<CleaningTask> => {
+    const payload = {
+      ...data,
+      checklist: data.checklist ? JSON.stringify(data.checklist) : undefined,
+    };
+    const res = await api<{ task: CleaningTask }>("POST", "/api/cleaning-tasks", payload);
+    await refreshLookups();
+    return res.task;
+  }, [refreshLookups]);
+
+  const updateCleaningTask = useCallback(async (id: number, patch: UpdateCleaningTaskInput): Promise<CleaningTask> => {
+    const payload = {
+      ...patch,
+      checklist: Array.isArray(patch.checklist) ? JSON.stringify(patch.checklist) : patch.checklist,
+    };
+    const res = await api<{ task: CleaningTask }>("PUT", `/api/cleaning-tasks/${id}`, payload);
+    await refreshLookups();
+    return res.task;
+  }, [refreshLookups]);
+
+  const deleteCleaningTask = useCallback(async (id: number): Promise<void> => {
+    await api("DELETE", `/api/cleaning-tasks/${id}`);
+    await refreshLookups();
+  }, [refreshLookups]);
+
+  const sendCleaningReminder = useCallback(async (id: number): Promise<{ ok: boolean; email_result?: any }> => {
+    return await api<{ ok: boolean; email_result?: any }>("POST", `/api/cleaning-tasks/${id}/send-reminder`);
+  }, []);
+
   const getAirbnbAnalytics = useCallback(async (propertyId?: number): Promise<AirbnbAnalytics> => {
     const path = propertyId ? `/api/airbnb/analytics?property_id=${propertyId}` : "/api/airbnb/analytics";
     return await api<AirbnbAnalytics>("GET", path);
@@ -506,6 +568,9 @@ export function useAppState() {
     // airbnb
     listAirbnbBookings, createAirbnbBooking, updateAirbnbBooking, deleteAirbnbBooking,
     scheduleTurnoverCleaning, getAirbnbAnalytics,
+    // cleaners & cleaning tasks
+    listCleaners, listCleaningTasks, getCleaningTask, createCleaningTask, updateCleaningTask,
+    deleteCleaningTask, sendCleaningReminder,
     // demo data management
     getDemoDataStatus, deleteDemoData, restoreDemoData,
   };

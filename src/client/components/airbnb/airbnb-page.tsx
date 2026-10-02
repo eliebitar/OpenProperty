@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { BookingDialog } from "./booking-dialog";
 import { GuestPackDialog } from "./guest-pack-dialog";
+import { TurnoverCleanersTab } from "./turnover-cleaners-tab";
 import type { AirbnbAnalytics, AirbnbBooking, BookingStatus, Unit } from "@/types";
 
 const PLATFORM_BADGES: Record<string, { label: string; tone: string }> = {
@@ -63,6 +64,7 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
   const [analytics, setAnalytics] = useState<AirbnbAnalytics | null>(null);
   const [airbnbUnits, setAirbnbUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"bookings" | "turnovers" | "units">("bookings");
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -269,47 +271,60 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
         />
       </section>
 
-      {/* Turnover Cleaning Alert Banner if check-outs are due */}
-      {turnoversDue.length > 0 && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-semibold text-xs">
-              <Sparkles className="size-4 text-amber-600 dark:text-amber-400" />
-              <span>Turnover Housekeeping Required ({turnoversDue.length} departures)</span>
-            </div>
-            <span className="text-[11px] text-amber-700 dark:text-amber-400">
-              Cleanings due for upcoming check-ins
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
-            {turnoversDue.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center justify-between rounded-md border border-amber-500/20 bg-card p-2.5 text-xs shadow-xs"
-              >
-                <div>
-                  <div className="font-semibold text-foreground">{b.unit_name}</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    Guest {b.guest_name} departing {formatDate(b.check_out_date)}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleScheduleCleaning(b)}
-                  className="h-7 text-xs gap-1 border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
-                >
-                  <Wrench className="size-3" /> Schedule Clean
-                </Button>
-              </div>
-            ))}
-          </div>
+      {/* Navigation Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+        <div className="flex items-center gap-2">
+          <Button
+            variant={activeTab === "bookings" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveTab("bookings")}
+            className={`h-8 rounded-xl text-xs font-semibold gap-1.5 ${
+              activeTab === "bookings" ? "bg-rose-600 hover:bg-rose-700 text-white" : ""
+            }`}
+          >
+            <Calendar className="size-3.5" /> Reservations ({bookings.length})
+          </Button>
+          <Button
+            variant={activeTab === "turnovers" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveTab("turnovers")}
+            className={`h-8 rounded-xl text-xs font-semibold gap-1.5 ${
+              activeTab === "turnovers" ? "bg-teal-600 hover:bg-teal-700 text-white shadow-xs" : ""
+            }`}
+          >
+            <Sparkles className="size-3.5" /> Turnovers & Cleaners
+          </Button>
+          <Button
+            variant={activeTab === "units" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveTab("units")}
+            className={`h-8 rounded-xl text-xs font-semibold gap-1.5 ${
+              activeTab === "units" ? "bg-primary text-primary-foreground" : ""
+            }`}
+          >
+            <Building2 className="size-3.5" /> Unit Portfolio ({airbnbUnits.length})
+          </Button>
         </div>
+
+        {navigate && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/cleaner")}
+            className="h-8 text-xs font-semibold text-teal-700 dark:text-teal-300 hover:bg-teal-500/10 gap-1.5"
+          >
+            <Sparkles className="size-3.5" /> Open Cleaner Portal &rarr;
+          </Button>
+        )}
+      </div>
+
+      {/* Tab 1: Turnovers & Cleaners */}
+      {activeTab === "turnovers" && (
+        <TurnoverCleanersTab airbnbUnits={airbnbUnits} navigate={navigate} />
       )}
 
-      {/* Airbnb Units Inventory Overview */}
-      {airbnbUnits.length > 0 && (
+      {/* Tab 2: Unit Portfolio */}
+      {activeTab === "units" && airbnbUnits.length > 0 && (
         <section className="space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold flex items-center gap-1.5">
@@ -491,8 +506,55 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
       )}
 
-      {/* Bookings Table & Controls */}
-      <section className="space-y-3">
+      {/* Tab 3: Reservations & Calendar */}
+      {activeTab === "bookings" && (
+        <div className="space-y-4">
+          {/* Turnover Cleaning Alert Banner if check-outs are due */}
+          {turnoversDue.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-semibold text-xs">
+                  <Sparkles className="size-4 text-amber-600 dark:text-amber-400" />
+                  <span>Turnover Housekeeping Required ({turnoversDue.length} departures)</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setActiveTab("turnovers")}
+                  className="h-6 text-[11px] text-amber-900 dark:text-amber-200 hover:bg-amber-500/20 font-bold"
+                >
+                  Manage All Turnovers &rarr;
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                {turnoversDue.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between rounded-md border border-amber-500/20 bg-card p-2.5 text-xs shadow-xs"
+                  >
+                    <div>
+                      <div className="font-semibold text-foreground">{b.unit_name}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Guest {b.guest_name} departing {formatDate(b.check_out_date)}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleScheduleCleaning(b)}
+                      className="h-7 text-xs gap-1 border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20"
+                    >
+                      <Wrench className="size-3" /> Schedule Clean
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Bookings Table & Controls */}
+          <section className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Status Tabs */}
           <div className="inline-flex rounded-md border bg-muted/40 p-1 text-xs font-medium">
@@ -691,6 +753,8 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         )}
       </section>
+      </div>
+      )}
 
       {/* Booking Dialog */}
       <BookingDialog

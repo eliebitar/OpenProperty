@@ -19,6 +19,7 @@ import { AirbnbPage } from "./components/airbnb/airbnb-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { OrganizationPage } from "./components/organization/organization-page";
+import { CleanerPage } from "./components/cleaner/cleaner-page";
 
 /**
  * The navigation, defined once.
@@ -41,6 +42,7 @@ const PORTFOLIO: AppNavItem[] = [
   { id: "airbnb", label: "Airbnb", href: "/airbnb", icon: "home", color: "pink" },
 ];
 const OPERATIONS: AppNavItem[] = [
+  { id: "cleaner", label: "Cleaning Schedule", href: "/cleaner", icon: "sparkles", color: "teal" },
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
 ];
@@ -114,6 +116,7 @@ function AppContent() {
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
               {route.name === "rent" && <RentPage navigate={navigate} />}
               {route.name === "airbnb" && <AirbnbPage navigate={navigate} />}
+              {route.name === "cleaner" && <CleanerPage navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
               {route.name === "organization" && <OrganizationPage navigate={navigate} />}
               {route.name === "settings" && <SettingsPage />}

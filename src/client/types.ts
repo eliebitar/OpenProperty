@@ -63,6 +63,10 @@ export interface Unit {
   current_airbnb_guest_name?: string | null;
   current_airbnb_check_out?: string | null;
   airbnb_upcoming_bookings_count?: number | null;
+  cleaner_id?: number | null;
+  cleaner_name?: string | null;
+  cleaner_email?: string | null;
+  cleaning_checklist?: string | null;
 }
 
 export interface Tenant {
@@ -414,7 +418,7 @@ export interface DeleteDemoDataResult {
 
 // ── Organizations & Multi-User Team ───────────────────────────────
 
-export type OrganizationRole = "owner" | "admin" | "manager" | "viewer";
+export type OrganizationRole = "owner" | "admin" | "manager" | "viewer" | "cleaner";
 export type MemberStatus = "active" | "invited";
 
 export interface Organization {
@@ -483,5 +487,78 @@ export interface EmailLogEntry {
   error: string | null;
   created_at: string;
 }
+
+// ── Turnover Cleaning & Schedule ──────────────────────────────────
+
+export type CleaningStatus = "scheduled" | "in_progress" | "completed" | "cancelled";
+
+export interface ChecklistItem {
+  id: string;
+  task: string;
+  done: boolean;
+}
+
+export interface CleaningTask {
+  id: number;
+  organization_id: number;
+  unit_id: number;
+  unit_name: string;
+  property_id: number;
+  property_name: string;
+  property_address?: string | null;
+  property_city?: string | null;
+  booking_id?: number | null;
+  guest_name?: string | null;
+  booking_guest_name?: string | null;
+  cleaner_id?: number | null;
+  cleaner_name?: string | null;
+  cleaner_email?: string | null;
+  scheduled_date: string;         // 'YYYY-MM-DD'
+  scheduled_time: string;         // e.g. '11:00'
+  next_check_in_date?: string | null;
+  next_check_in_time?: string | null;
+  status: CleaningStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  checklist?: string | null;       // JSON encoded ChecklistItem[]
+  notes?: string | null;
+  issue_reported?: string | null;
+  lockbox_code?: string | null;
+  airbnb_lockbox_code?: string | null;
+  wifi_ssid?: string | null;
+  airbnb_wifi_ssid?: string | null;
+  wifi_password?: string | null;
+  airbnb_wifi_password?: string | null;
+  reminder_sent_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CreateCleaningTaskInput {
+  unit_id: number;
+  booking_id?: number | null;
+  cleaner_id?: number | null;
+  scheduled_date: string;
+  scheduled_time?: string;
+  next_check_in_date?: string | null;
+  next_check_in_time?: string | null;
+  notes?: string | null;
+  checklist?: ChecklistItem[];
+}
+
+export interface UpdateCleaningTaskInput {
+  cleaner_id?: number | null;
+  scheduled_date?: string;
+  scheduled_time?: string;
+  next_check_in_date?: string | null;
+  next_check_in_time?: string | null;
+  status?: CleaningStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  checklist?: ChecklistItem[] | string;
+  notes?: string | null;
+  issue_reported?: string | null;
+}
+
 
 

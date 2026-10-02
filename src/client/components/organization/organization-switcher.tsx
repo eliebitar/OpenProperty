@@ -10,6 +10,7 @@ import {
   Crown,
   Briefcase,
   Eye,
+  Sparkles,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,16 @@ export function getRoleBadge(role?: OrganizationRole | string) {
         >
           <Briefcase className="h-3 w-3 text-sky-500" />
           <span>Manager</span>
+        </Badge>
+      );
+    case "cleaner":
+      return (
+        <Badge
+          variant="outline"
+          className="border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-400 font-medium text-[11px] gap-1 px-1.5 py-0"
+        >
+          <Sparkles className="h-3 w-3 text-teal-500" />
+          <span>Cleaner</span>
         </Badge>
       );
     case "viewer":

@@ -86,6 +86,8 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
   const [airbnbListingUrl, setAirbnbListingUrl] = useState("");
   const [airbnbHouseRules, setAirbnbHouseRules] = useState("");
   const [airbnbCheckOutInstructions, setAirbnbCheckOutInstructions] = useState("");
+  const [cleanerId, setCleanerId] = useState<string>("none");
+  const [cleaners, setCleaners] = useState<{ id: number; name: string; email: string }[]>([]);
 
   // Airbnb Bookings inside Unit Dialog
   const [unitBookings, setUnitBookings] = useState<AirbnbBooking[]>([]);
@@ -126,6 +128,9 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
     setAirbnbListingUrl(unit?.airbnb_listing_url ?? "");
     setAirbnbHouseRules(unit?.airbnb_house_rules ?? "No smoking. Quiet hours 22:00 - 08:00.");
     setAirbnbCheckOutInstructions(unit?.airbnb_check_out_instructions ?? "Please leave keys in lockbox and turn off lights.");
+    setCleanerId(unit?.cleaner_id ? String(unit.cleaner_id) : "none");
+
+    app.listCleaners().then(setCleaners).catch(() => setCleaners([]));
 
     loadBookings();
 
@@ -234,6 +239,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
         airbnb_listing_url: airbnbListingUrl.trim() || null,
         airbnb_house_rules: airbnbHouseRules.trim() || null,
         airbnb_check_out_instructions: airbnbCheckOutInstructions.trim() || null,
+        cleaner_id: cleanerId && cleanerId !== "none" ? parseInt(cleanerId, 10) : null,
         notes: notes.trim() || null,
       };
 
@@ -547,6 +553,29 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
                     placeholder="https://airbnb.com/rooms/12345678"
                     className="h-8 text-xs font-mono"
                   />
+                </div>
+
+                {/* Assigned Turnover Cleaner */}
+                <div className="space-y-1.5 p-3 rounded-lg border border-teal-500/20 bg-teal-500/5">
+                  <Label htmlFor="ab-cleaner" className="text-xs font-semibold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                    <Sparkles className="size-3.5 text-teal-600" /> Assigned Turnover Cleaner
+                  </Label>
+                  <Select value={cleanerId} onValueChange={setCleanerId}>
+                    <SelectTrigger id="ab-cleaner" className="h-8 text-xs bg-background">
+                      <SelectValue placeholder="Select assigned cleaner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No default cleaner assigned</SelectItem>
+                      {cleaners.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name} ({c.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    When guests check out, this cleaner will automatically receive scheduled turnover tasks, access codes, and email reminders.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5">
