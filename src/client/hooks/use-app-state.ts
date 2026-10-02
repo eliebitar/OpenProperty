@@ -393,6 +393,7 @@ export function useAppState() {
     const payload = {
       ...patch,
       checklist: Array.isArray(patch.checklist) ? JSON.stringify(patch.checklist) : patch.checklist,
+      inspection_photos: Array.isArray(patch.inspection_photos) ? JSON.stringify(patch.inspection_photos) : patch.inspection_photos,
     };
     const res = await api<{ task: CleaningTask }>("PUT", `/api/cleaning-tasks/${id}`, payload);
     await refreshLookups();

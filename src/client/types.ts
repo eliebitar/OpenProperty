@@ -524,6 +524,7 @@ export interface CleaningTask {
   checklist?: string | null;       // JSON encoded ChecklistItem[]
   notes?: string | null;
   issue_reported?: string | null;
+  inspection_photos?: string | null; // JSON encoded InspectionPhoto[]
   lockbox_code?: string | null;
   airbnb_lockbox_code?: string | null;
   wifi_ssid?: string | null;
@@ -533,6 +534,17 @@ export interface CleaningTask {
   reminder_sent_at?: string | null;
   created_at: string;
   updated_at?: string;
+}
+
+export type InspectionZone = "bedroom" | "bathroom" | "kitchen" | "living_room" | "lockbox" | "other";
+
+export interface InspectionPhoto {
+  id: string;
+  zone: InspectionZone;
+  zoneLabel: string;
+  photoUrl: string;
+  takenAt: string;
+  caption?: string;
 }
 
 export interface CreateCleaningTaskInput {
@@ -545,6 +557,7 @@ export interface CreateCleaningTaskInput {
   next_check_in_time?: string | null;
   notes?: string | null;
   checklist?: ChecklistItem[];
+  inspection_photos?: InspectionPhoto[] | string;
 }
 
 export interface UpdateCleaningTaskInput {
@@ -559,6 +572,7 @@ export interface UpdateCleaningTaskInput {
   checklist?: ChecklistItem[] | string;
   notes?: string | null;
   issue_reported?: string | null;
+  inspection_photos?: InspectionPhoto[] | string | null;
 }
 
 

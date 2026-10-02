@@ -24,6 +24,7 @@ import {
   Navigation,
   CheckCircle,
   Send,
+  Camera,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
@@ -40,7 +41,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/utils";
-import type { ChecklistItem, CleaningTask } from "@/types";
+import { parseInspectionPhotos } from "@/lib/photo-utils";
+import { PhotoInspectionModal } from "./photo-inspection-modal";
+import { PhotoGalleryModal } from "./photo-gallery-modal";
+import type { ChecklistItem, CleaningTask, InspectionPhoto } from "@/types";
 
 const ISSUE_PRESETS = [
   "🧻 Toilet paper / soap / shampoo empty",
@@ -79,6 +83,10 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
   const [selectedIssuePresets, setSelectedIssuePresets] = useState<string[]>([]);
   const [issueNotes, setIssueNotes] = useState("");
   const [savingIssue, setSavingIssue] = useState(false);
+
+  // Photo proof modals
+  const [inspectionTask, setInspectionTask] = useState<CleaningTask | null>(null);
+  const [galleryTask, setGalleryTask] = useState<CleaningTask | null>(null);
 
   // Expanded items state (default all expanded for immediate access)
   const [expandedTasks, setExpandedTasks] = useState<Record<number, boolean>>({});
@@ -197,6 +205,34 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
       const updated = await app.updateCleaningTask(task.id, { status: "completed" });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
       showToast(`✨ ${task.unit_name} is Cleaned & Ready! Property manager has been notified.`);
+    } catch (err) {
+      app.setError((err as Error).message);
+    }
+  };
+
+  const handleCompleteWithPhotos = async (photos: InspectionPhoto[], notes?: string) => {
+    if (!inspectionTask) return;
+    try {
+      const updated = await app.updateCleaningTask(inspectionTask.id, {
+        status: "completed",
+        inspection_photos: photos,
+        notes: notes || inspectionTask.notes || undefined,
+      });
+      setTasks((prev) => prev.map((t) => (t.id === inspectionTask.id ? updated : t)));
+      showToast(`✨ ${inspectionTask.unit_name} is Cleaned & Ready! Proof photos submitted to manager.`);
+    } catch (err) {
+      app.setError((err as Error).message);
+    }
+  };
+
+  const handleSaveDraftPhotos = async (photos: InspectionPhoto[]) => {
+    if (!inspectionTask) return;
+    try {
+      const updated = await app.updateCleaningTask(inspectionTask.id, {
+        inspection_photos: photos,
+      });
+      setTasks((prev) => prev.map((t) => (t.id === inspectionTask.id ? updated : t)));
+      showToast("Saved photo draft successfully.");
     } catch (err) {
       app.setError((err as Error).message);
     }
@@ -432,6 +468,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
             const lockbox = task.airbnb_lockbox_code || task.lockbox_code;
             const isCompleted = task.status === "completed";
             const isInProgress = task.status === "in_progress";
+            const photos = parseInspectionPhotos(task.inspection_photos);
 
             return (
               <Card
@@ -470,7 +507,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                       </div>
 
                       {/* Status Badges */}
-                      <div>
+                      <div className="flex flex-col items-end gap-1.5">
                         {isInProgress && (
                           <Badge className="bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/40 font-bold text-xs py-1 px-2.5 animate-pulse">
                             🧹 Cleaning In Progress
@@ -485,6 +522,17 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                           <Badge className="bg-teal-500/20 text-teal-800 dark:text-teal-200 border-teal-500/40 font-bold text-xs py-1 px-2.5">
                             📅 Scheduled
                           </Badge>
+                        )}
+
+                        {photos.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setGalleryTask(task)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-teal-500/15 text-teal-800 dark:text-teal-300 hover:bg-teal-500/25 transition-colors cursor-pointer border border-teal-500/30"
+                          >
+                            <Camera className="size-3 text-teal-600" />
+                            <span>{photos.length} Photo{photos.length === 1 ? "" : "s"}</span>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -716,30 +764,58 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                     )}
 
                     {isInProgress && (
-                      <Button
-                        size="lg"
-                        onClick={() => handleCompleteCleaning(task)}
-                        className="w-full h-13 sm:h-14 rounded-xl text-base sm:text-lg font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg gap-2 cursor-pointer active:scale-[0.99] transition-transform"
-                      >
-                        <CheckCircle2 className="size-6 text-white" />
-                        <span>✓ Mark as Cleaned & Ready</span>
-                      </Button>
+                      <div className="space-y-2">
+                        <Button
+                          size="lg"
+                          onClick={() => setInspectionTask(task)}
+                          className="w-full h-13 sm:h-14 rounded-xl text-base sm:text-lg font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg gap-2 cursor-pointer active:scale-[0.99] transition-transform"
+                        >
+                          <Camera className="size-5 text-white" />
+                          <span>📸 Photo Walkthrough & Mark Cleaned</span>
+                        </Button>
+
+                        {photos.length > 0 && (
+                          <div className="flex items-center justify-between text-xs px-1 text-muted-foreground">
+                            <span>{photos.length} inspection photo{photos.length === 1 ? "" : "s"} saved</span>
+                            <button
+                              type="button"
+                              onClick={() => setGalleryTask(task)}
+                              className="font-bold text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
+                            >
+                              Preview Photos &rarr;
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {isCompleted && (
-                      <div className="p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 flex items-center justify-between gap-3">
+                      <div className="p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-200 font-extrabold text-xs sm:text-sm">
                           <CheckCircle2 className="size-5 text-emerald-600 shrink-0" />
                           <span>Unit is fully cleaned & ready for guests!</span>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleReopenCleaning(task)}
-                          className="h-7 text-[11px] text-muted-foreground hover:text-foreground gap-1"
-                        >
-                          <RotateCcw className="size-3" /> Reopen
-                        </Button>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          {photos.length > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setGalleryTask(task)}
+                              className="h-8 text-xs font-bold rounded-xl border-emerald-500/40 bg-card hover:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 gap-1.5"
+                            >
+                              <Camera className="size-3.5 text-emerald-600" />
+                              <span>View Photos ({photos.length})</span>
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleReopenCleaning(task)}
+                            className="h-8 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                          >
+                            <RotateCcw className="size-3" /> Reopen
+                          </Button>
+                        </div>
                       </div>
                     )}
 
@@ -844,6 +920,26 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Photo Inspection Walkthrough Modal */}
+      {inspectionTask && (
+        <PhotoInspectionModal
+          open={!!inspectionTask}
+          onOpenChange={(open) => !open && setInspectionTask(null)}
+          task={inspectionTask}
+          onComplete={handleCompleteWithPhotos}
+          onSaveDraftOnly={handleSaveDraftPhotos}
+        />
+      )}
+
+      {/* Photo Gallery Modal */}
+      {galleryTask && (
+        <PhotoGalleryModal
+          open={!!galleryTask}
+          onOpenChange={(open) => !open && setGalleryTask(null)}
+          task={galleryTask}
+        />
+      )}
     </PageShell>
   );
 }

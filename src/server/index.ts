@@ -241,6 +241,11 @@ async function ensureSeeded(): Promise<void> {
     } catch {
       // Column already exists
     }
+    try {
+      await run("ALTER TABLE cleaning_tasks ADD COLUMN inspection_photos TEXT");
+    } catch {
+      // Column already exists
+    }
 
     // Ensure default organization exists
     const orgCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM organizations");
@@ -4036,6 +4041,7 @@ const UpdateCleaningTaskInput = z.object({
   checklist: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   issue_reported: z.string().optional().nullable(),
+  inspection_photos: z.string().optional().nullable(),
 });
 
 app.put("/api/cleaning-tasks/:id", async (c) => {
@@ -4068,6 +4074,7 @@ app.put("/api/cleaning-tasks/:id", async (c) => {
   if (data.checklist !== undefined) { sets.push("checklist = ?"); params.push(data.checklist); }
   if (data.notes !== undefined) { sets.push("notes = ?"); params.push(data.notes); }
   if (data.issue_reported !== undefined) { sets.push("issue_reported = ?"); params.push(data.issue_reported); }
+  if (data.inspection_photos !== undefined) { sets.push("inspection_photos = ?"); params.push(data.inspection_photos); }
 
   if (data.status !== undefined) {
     sets.push("status = ?");

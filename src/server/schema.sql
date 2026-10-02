@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS cleaning_tasks (
   checklist TEXT,                      -- JSON array e.g. [{"id":"1","task":"Linens washed","done":true}]
   notes TEXT,                          -- Special instructions or turnover notes
   issue_reported TEXT,                 -- Damage or maintenance report by cleaner
+  inspection_photos TEXT,              -- JSON array e.g. [{"id":"...","zone":"bedroom","photoUrl":"..."}]
   reminder_sent_at TEXT,               -- Timestamp when email reminder was sent
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

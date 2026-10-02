@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ExternalLink,
   ShieldAlert,
+  Camera,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/utils";
+import { parseInspectionPhotos } from "@/lib/photo-utils";
+import { PhotoGalleryModal } from "../cleaner/photo-gallery-modal";
 import type { CleaningTask, OrganizationMember, Unit } from "@/types";
 
 interface Props {
@@ -77,6 +80,9 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
   const [assignUnitsCleaner, setAssignUnitsCleaner] = useState<OrganizationMember | null>(null);
   const [assignedUnitIds, setAssignedUnitIds] = useState<number[]>([]);
   const [savingUnitAssignments, setSavingUnitAssignments] = useState(false);
+
+  // Photo gallery inspection modal
+  const [photoGalleryTask, setPhotoGalleryTask] = useState<CleaningTask | null>(null);
 
   async function loadData() {
     try {
@@ -488,6 +494,7 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
             {filteredTasks.map((task) => {
               const isCompleted = task.status === "completed";
               const isInProgress = task.status === "in_progress";
+              const photos = parseInspectionPhotos(task.inspection_photos);
 
               return (
                 <Card
@@ -582,6 +589,19 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
 
                       {/* Right: Actions */}
                       <div className="flex items-center gap-2 pt-3 sm:pt-0">
+                        {photos.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setPhotoGalleryTask(task)}
+                            className="h-8 text-xs gap-1.5 border-emerald-500/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/10 font-bold bg-card"
+                            title="View cleaner photo evidence walkthrough"
+                          >
+                            <Camera className="size-3.5 text-emerald-600" />
+                            <span>Photo Proof ({photos.length})</span>
+                          </Button>
+                        )}
+
                         {task.cleaner_id && !isCompleted && (
                           <Button
                             size="sm"
@@ -873,6 +893,15 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Photo Gallery Modal */}
+      {photoGalleryTask && (
+        <PhotoGalleryModal
+          open={!!photoGalleryTask}
+          onOpenChange={(open) => !open && setPhotoGalleryTask(null)}
+          task={photoGalleryTask}
+        />
+      )}
     </div>
   );
 }
