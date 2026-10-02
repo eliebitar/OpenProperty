@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Home,
   Receipt,
+  Sparkles,
   Wrench,
 } from "lucide-react";
 import { useApp } from "@/context";
@@ -78,6 +79,47 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
             tone={summary.urgent_work_orders > 0 ? "warn" : "default"}
           />
         </section>
+
+        {(summary.airbnb_units ?? 0) > 0 && (
+          <section className="rounded-xl border border-rose-500/25 bg-gradient-to-r from-rose-500/5 via-pink-500/5 to-transparent p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="flex size-7 items-center justify-center rounded-lg bg-rose-500/10 text-rose-500">
+                  <Sparkles className="size-4" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">Airbnb Short-Term Rentals</h2>
+                  <p className="text-xs text-muted-foreground">Vacation listings, active guests, and turnover pipeline</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("/airbnb")}
+                className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline"
+              >
+                Manage bookings & turnovers →
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
+              <div className="rounded-lg border bg-card/60 p-3 backdrop-blur-sm">
+                <span className="text-[11px] font-medium text-muted-foreground block">Active Listings</span>
+                <span className="text-xl font-bold font-mono text-foreground">{summary.airbnb_units}</span>
+              </div>
+              <div className="rounded-lg border bg-card/60 p-3 backdrop-blur-sm">
+                <span className="text-[11px] font-medium text-muted-foreground block">Current Guests</span>
+                <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{summary.airbnb_active_guests ?? 0}</span>
+              </div>
+              <div className="rounded-lg border bg-card/60 p-3 backdrop-blur-sm">
+                <span className="text-[11px] font-medium text-muted-foreground block">STR Payouts (Month)</span>
+                <span className="text-xl font-bold font-mono text-foreground">{formatMoney(summary.airbnb_month_revenue ?? 0, settings.currency)}</span>
+              </div>
+              <div className="rounded-lg border bg-card/60 p-3 backdrop-blur-sm">
+                <span className="text-[11px] font-medium text-muted-foreground block">Upcoming Check-ins</span>
+                <span className="text-xl font-bold font-mono text-primary">{summary.airbnb_upcoming_checkins ?? 0}</span>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <Card className="p-5">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench, User, UserPlus } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench, User, UserPlus, Sparkles, KeyRound, Calendar } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
@@ -19,6 +19,7 @@ const TYPE_LABEL: Record<string, string> = {
   condo: "Condo",
   townhouse: "Townhouse",
   commercial: "Commercial",
+  airbnb: "Airbnb / Vacation",
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -142,6 +143,29 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
               <Plus className="mr-1 h-4 w-4" /> New unit
             </Button>
           </div>
+          {units.some((u) => u.type === "airbnb") && (
+            <div className="mb-4 flex items-center justify-between rounded-lg border border-rose-500/20 bg-rose-500/5 p-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-7 items-center justify-center rounded-md bg-rose-500/10 text-rose-500">
+                  <Sparkles className="size-4" />
+                </span>
+                <div>
+                  <p className="font-semibold text-foreground">Airbnb Short-Term Rental Listings</p>
+                  <p className="text-muted-foreground">
+                    This property has {units.filter((u) => u.type === "airbnb").length} short-term rental unit(s). Track bookings, turnovers, and STR payouts in the Airbnb Hub.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs h-7 gap-1"
+                onClick={() => navigate("/airbnb")}
+              >
+                Open Airbnb Hub →
+              </Button>
+            </div>
+          )}
           {units.length === 0 ? (
             <Card className="p-8 text-center text-sm text-muted-foreground">
               No units yet. Add one to start tracking leases and rent.
@@ -149,6 +173,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
               {units.map((u) => {
+                const isAirbnb = u.type === "airbnb";
                 const unitSummary = operatingSummary?.units.find((ou) => ou.unit_id === u.id);
                 const coldRent = u.active_rent ?? u.market_rent ?? 0;
                 const monthlyOpAdvance = ((u.active_operating_advance ?? 0) + (u.active_heating_advance ?? 0)) || (u.monthly_operating_cost ?? 0);
@@ -160,16 +185,22 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                     key={u.id}
                     className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted/40 flex flex-col justify-between"
                     onClick={() => {
-                      setEditingUnit(u);
-                      setUnitDialogOpen(true);
+                      navigate(`/units/${u.id}`);
                     }}
                   >
                     <div>
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="font-semibold text-base">{u.name}</h3>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-semibold text-base">{u.name}</h3>
+                            {isAirbnb && (
+                              <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25 text-[10px] px-1.5 py-0 h-4">
+                                Airbnb
+                              </Badge>
+                            )}
+                          </div>
                           <p className="mt-0.5 text-xs text-muted-foreground">
-                            {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} m²` : ""}
+                            {u.bedrooms} bd · {u.bathrooms} ba{isAirbnb ? ` · Up to ${u.airbnb_max_guests || 2} guests` : ""}{u.sqft ? ` · ${u.sqft} m²` : ""}
                           </p>
                         </div>
                         <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
@@ -177,27 +208,74 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                         </span>
                       </div>
 
-                      {/* Monthly Rent Breakdown */}
-                      <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-md border bg-muted/20 p-2 text-xs">
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block font-medium">Cold Rent</span>
-                          <span className="font-mono font-semibold tabular-nums text-foreground">
-                            {formatMoney(coldRent, app.settings.currency)}
-                          </span>
+                      {/* Pricing Breakdown: Airbnb vs Long-term */}
+                      {isAirbnb ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="grid grid-cols-3 gap-1.5 rounded-md border border-rose-500/20 bg-rose-500/5 p-2 text-xs">
+                            <div>
+                              <span className="text-[10px] text-muted-foreground block font-medium">Nightly Rate</span>
+                              <span className="font-mono font-semibold tabular-nums text-foreground">
+                                {formatMoney(u.airbnb_nightly_rate ?? (u.market_rent || 0), app.settings.currency)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-muted-foreground block font-medium">Cleaning</span>
+                              <span className="font-mono font-semibold tabular-nums text-foreground">
+                                {formatMoney(u.airbnb_cleaning_fee ?? 0, app.settings.currency)}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] text-muted-foreground block font-medium">Min Stay</span>
+                              <span className="font-mono font-semibold tabular-nums text-foreground">
+                                {u.airbnb_min_nights ?? 1} {Number(u.airbnb_min_nights ?? 1) === 1 ? "night" : "nights"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {u.current_airbnb_guest_name ? (
+                            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-xs flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] uppercase font-semibold text-rose-600 dark:text-rose-400 block">
+                                  Current Guest
+                                </span>
+                                <span className="font-semibold text-foreground">{u.current_airbnb_guest_name}</span>
+                              </div>
+                              {u.current_airbnb_check_out && (
+                                <span className="text-[11px] text-muted-foreground font-mono">
+                                  Out: {formatDate(u.current_airbnb_check_out)}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed p-1.5 text-center text-[11px] text-muted-foreground">
+                              {u.airbnb_upcoming_bookings_count
+                                ? `${u.airbnb_upcoming_bookings_count} upcoming reservation(s) scheduled`
+                                : "No active guest · Ready for booking"}
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <span className="text-[10px] text-muted-foreground block font-medium">Nebenkosten</span>
-                          <span className="font-mono font-semibold tabular-nums text-foreground">
-                            +{formatMoney(monthlyOpAdvance, app.settings.currency)}
-                          </span>
+                      ) : (
+                        <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-md border bg-muted/20 p-2 text-xs">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium">Cold Rent</span>
+                            <span className="font-mono font-semibold tabular-nums text-foreground">
+                              {formatMoney(coldRent, app.settings.currency)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium">Nebenkosten</span>
+                            <span className="font-mono font-semibold tabular-nums text-foreground">
+                              +{formatMoney(monthlyOpAdvance, app.settings.currency)}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-muted-foreground block font-medium">Warm Rent</span>
+                            <span className="font-mono font-bold tabular-nums text-primary">
+                              {formatMoney(warmRent, app.settings.currency)}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="text-[10px] text-muted-foreground block font-medium">Warm Rent</span>
-                          <span className="font-mono font-bold tabular-nums text-primary">
-                            {formatMoney(warmRent, app.settings.currency)}
-                          </span>
-                        </div>
-                      </div>
+                      )}
 
                       {/* Yearly Operating Cost Settlement Comparison */}
                       {unitSummary && (
@@ -252,27 +330,48 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                       )}
                     </div>
 
-                    {/* Tenant Footer Row */}
+                    {/* Footer Row */}
                     <div className="mt-3 flex items-center justify-between border-t pt-2.5 text-xs">
-                      <span className="text-muted-foreground text-[11px]">Tenant:</span>
-                      {u.active_tenant_name ? (
-                        <span className="font-medium text-foreground flex items-center gap-1">
-                          <User className="h-3 w-3 text-muted-foreground" />
-                          {u.active_tenant_name}
-                        </span>
+                      {isAirbnb ? (
+                        <>
+                          <span className="text-muted-foreground text-[11px] flex items-center gap-1">
+                            <Sparkles className="size-3 text-rose-500" /> Short-term rental
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[11px] px-2 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/units/${u.id}`);
+                            }}
+                          >
+                            Unit Details & Stays →
+                          </Button>
+                        </>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 text-[11px] px-2 gap-1 text-primary hover:text-primary hover:bg-primary/5"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingUnit(u);
-                            setUnitDialogOpen(true);
-                          }}
-                        >
-                          <UserPlus className="h-3 w-3" /> Assign tenant
-                        </Button>
+                        <>
+                          <span className="text-muted-foreground text-[11px]">Tenant:</span>
+                          {u.active_tenant_name ? (
+                            <span className="font-medium text-foreground flex items-center gap-1">
+                              <User className="h-3 w-3 text-muted-foreground" />
+                              {u.active_tenant_name}
+                            </span>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-[11px] px-2 gap-1 text-primary hover:text-primary hover:bg-primary/5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingUnit(u);
+                                setUnitDialogOpen(true);
+                              }}
+                            >
+                              <UserPlus className="h-3 w-3" /> Assign tenant
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </Card>

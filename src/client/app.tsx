@@ -10,10 +10,12 @@ import { ErrorBanner } from "./components/error-banner";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
 import { PropertyPage } from "./components/properties/property-page";
+import { UnitPage } from "./components/properties/unit-page";
 import { TenantsList } from "./components/tenants/tenants-list";
 import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
+import { AirbnbPage } from "./components/airbnb/airbnb-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
 
@@ -35,6 +37,7 @@ const PORTFOLIO: AppNavItem[] = [
   { id: "properties", label: "Properties", href: "/properties", icon: "building-2", color: "green" },
   { id: "tenants", label: "Tenants", href: "/tenants", icon: "users", color: "blue" },
   { id: "leases", label: "Leases", href: "/leases", icon: "clipboard-list", color: "violet" },
+  { id: "airbnb", label: "Airbnb", href: "/airbnb", icon: "home", color: "pink" },
 ];
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
@@ -46,7 +49,7 @@ const ADMIN: AppNavItem[] = [
 
 /** A record page keeps its collection's row lit. */
 function activeFor(route: Route): string {
-  if (route.name === "property") return "properties";
+  if (route.name === "property" || route.name === "unit") return "properties";
   if (route.name === "tenant") return "tenants";
   return route.name;
 }
@@ -103,10 +106,12 @@ function AppContent() {
               {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
               {route.name === "properties" && <PropertiesList navigate={navigate} />}
               {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+              {route.name === "unit" && <UnitPage id={route.id} propertyId={route.propertyId} navigate={navigate} />}
               {route.name === "tenants" && <TenantsList navigate={navigate} />}
               {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
-              {route.name === "rent" && <RentPage />}
+              {route.name === "rent" && <RentPage navigate={navigate} />}
+              {route.name === "airbnb" && <AirbnbPage navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
               {route.name === "settings" && <SettingsPage />}
               {route.name === "not-found" && (

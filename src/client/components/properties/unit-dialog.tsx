@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { User, UserPlus, UserCheck, XCircle, FileText, ChevronDown, ChevronUp, Receipt, CheckCircle2, AlertCircle } from "lucide-react";
+import { User, UserPlus, UserCheck, XCircle, FileText, ChevronDown, ChevronUp, Receipt, CheckCircle2, AlertCircle, KeyRound, Wifi, Sparkles, Home, Calendar, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { api } from "@/api";
-import { cn, toIsoDate, formatMoney } from "@/lib/utils";
+import { cn, toIsoDate, formatMoney, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,7 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { LeaseDialog } from "@/components/leases/lease-dialog";
 import { NebenkostenStatementDialog } from "./nebenkosten-statement-dialog";
-import type { Unit, UnitStatus, Tenant, OperatingCostsSummary, UnitOperatingCostBreakdown } from "@/types";
+import { BookingDialog } from "../airbnb/booking-dialog";
+import { GuestPackDialog } from "../airbnb/guest-pack-dialog";
+import type { Unit, UnitStatus, Tenant, OperatingCostsSummary, UnitOperatingCostBreakdown, AirbnbBooking } from "@/types";
 
 interface Props {
   open: boolean;
@@ -71,6 +73,34 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
   const [statementUnitBreakdown, setStatementUnitBreakdown] = useState<UnitOperatingCostBreakdown | null>(null);
   const [statementDialogOpen, setStatementDialogOpen] = useState(false);
 
+  // Airbnb Listing state
+  const [airbnbNightlyRate, setAirbnbNightlyRate] = useState("120");
+  const [airbnbCleaningFee, setAirbnbCleaningFee] = useState("50");
+  const [airbnbMaxGuests, setAirbnbMaxGuests] = useState("2");
+  const [airbnbMinNights, setAirbnbMinNights] = useState("1");
+  const [airbnbCheckInTime, setAirbnbCheckInTime] = useState("15:00");
+  const [airbnbCheckOutTime, setAirbnbCheckOutTime] = useState("11:00");
+  const [airbnbWifiSsid, setAirbnbWifiSsid] = useState("");
+  const [airbnbWifiPassword, setAirbnbWifiPassword] = useState("");
+  const [airbnbLockboxCode, setAirbnbLockboxCode] = useState("");
+  const [airbnbListingUrl, setAirbnbListingUrl] = useState("");
+  const [airbnbHouseRules, setAirbnbHouseRules] = useState("");
+  const [airbnbCheckOutInstructions, setAirbnbCheckOutInstructions] = useState("");
+
+  // Airbnb Bookings inside Unit Dialog
+  const [unitBookings, setUnitBookings] = useState<AirbnbBooking[]>([]);
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [guestPackOpen, setGuestPackOpen] = useState(false);
+  const [activeUnitBooking, setActiveUnitBooking] = useState<AirbnbBooking | null>(null);
+
+  const loadBookings = () => {
+    if (unit?.id) {
+      app.listAirbnbBookings({ unit_id: unit.id }).then(setUnitBookings).catch(() => setUnitBookings([]));
+    } else {
+      setUnitBookings([]);
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     setName(unit?.name ?? "");
@@ -82,6 +112,22 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
     setMonthlyOperatingCost(String(unit?.monthly_operating_cost ?? 0));
     setStatus(unit?.status ?? "vacant");
     setNotes(unit?.notes ?? "");
+
+    // Airbnb initialization
+    setAirbnbNightlyRate(String(unit?.airbnb_nightly_rate ?? (unit?.market_rent || 120)));
+    setAirbnbCleaningFee(String(unit?.airbnb_cleaning_fee ?? 50));
+    setAirbnbMaxGuests(String(unit?.airbnb_max_guests ?? 2));
+    setAirbnbMinNights(String(unit?.airbnb_min_nights ?? 1));
+    setAirbnbCheckInTime(unit?.airbnb_check_in_time ?? "15:00");
+    setAirbnbCheckOutTime(unit?.airbnb_check_out_time ?? "11:00");
+    setAirbnbWifiSsid(unit?.airbnb_wifi_ssid ?? "");
+    setAirbnbWifiPassword(unit?.airbnb_wifi_password ?? "");
+    setAirbnbLockboxCode(unit?.airbnb_lockbox_code ?? "");
+    setAirbnbListingUrl(unit?.airbnb_listing_url ?? "");
+    setAirbnbHouseRules(unit?.airbnb_house_rules ?? "No smoking. Quiet hours 22:00 - 08:00.");
+    setAirbnbCheckOutInstructions(unit?.airbnb_check_out_instructions ?? "Please leave keys in lockbox and turn off lights.");
+
+    loadBookings();
 
     // Default dates
     const today = toIsoDate(new Date());
@@ -176,6 +222,18 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
         market_rent: parseFloat(marketRent) || 0,
         monthly_operating_cost: parseFloat(monthlyOperatingCost) || 0,
         status: finalStatus,
+        airbnb_nightly_rate: parseFloat(airbnbNightlyRate) || parseFloat(marketRent) || 0,
+        airbnb_cleaning_fee: parseFloat(airbnbCleaningFee) || 0,
+        airbnb_max_guests: parseInt(airbnbMaxGuests, 10) || 2,
+        airbnb_min_nights: parseInt(airbnbMinNights, 10) || 1,
+        airbnb_check_in_time: airbnbCheckInTime.trim() || "15:00",
+        airbnb_check_out_time: airbnbCheckOutTime.trim() || "11:00",
+        airbnb_wifi_ssid: airbnbWifiSsid.trim() || null,
+        airbnb_wifi_password: airbnbWifiPassword.trim() || null,
+        airbnb_lockbox_code: airbnbLockboxCode.trim() || null,
+        airbnb_listing_url: airbnbListingUrl.trim() || null,
+        airbnb_house_rules: airbnbHouseRules.trim() || null,
+        airbnb_check_out_instructions: airbnbCheckOutInstructions.trim() || null,
         notes: notes.trim() || null,
       };
 
@@ -273,6 +331,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
                   <SelectContent>
                     <SelectItem value="residential">Residential (Wohnung)</SelectItem>
                     <SelectItem value="commercial">Commercial (Gewerbe / Laden)</SelectItem>
+                    <SelectItem value="airbnb">Airbnb (Short-Term / Vacation Rental)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -311,7 +370,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
               </div>
             </div>
 
-            {/* Occupancy Status & Warm Rent Header Preview */}
+            {/* Occupancy Status & Rate Preview */}
             <div className="grid grid-cols-2 gap-3 items-end">
               <div>
                 <Label>Occupancy Status</Label>
@@ -329,66 +388,331 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
                 </Select>
               </div>
               <div className="flex flex-col justify-end">
-                <Label className="text-xs text-muted-foreground pb-1">Warm Rent Preview</Label>
-                <div className="flex h-9 items-center justify-between rounded-md border border-input bg-primary/5 px-3 py-1 text-sm font-semibold font-mono text-primary">
-                  <span className="text-xs font-normal text-muted-foreground">Warmmiete:</span>
-                  <span>{formatMoney((parseFloat(marketRent) || 0) + (parseFloat(monthlyOperatingCost) || 0), currency)}/mo</span>
+                <Label className="text-xs text-muted-foreground pb-1">
+                  {type === "airbnb" ? "Airbnb Nightly Rate" : "Warm Rent Preview"}
+                </Label>
+                <div
+                  className={cn(
+                    "flex h-9 items-center justify-between rounded-md border px-3 py-1 text-sm font-semibold font-mono",
+                    type === "airbnb"
+                      ? "border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400"
+                      : "border-input bg-primary/5 text-primary",
+                  )}
+                >
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {type === "airbnb" ? "Base / night:" : "Warmmiete:"}
+                  </span>
+                  <span>
+                    {type === "airbnb"
+                      ? `${formatMoney(parseFloat(airbnbNightlyRate) || parseFloat(marketRent) || 0, currency)}/night`
+                      : `${formatMoney((parseFloat(marketRent) || 0) + (parseFloat(monthlyOperatingCost) || 0), currency)}/mo`}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Monthly Rent & Operating Prepayments (3 Columns) */}
-            <div className="rounded-lg border bg-muted/10 p-3 space-y-2">
-              <div className="text-xs font-semibold text-foreground flex items-center justify-between">
-                <span>Monthly Rent & Operating Prepayment (Miete & Nebenkosten)</span>
-                <span className="text-[11px] font-normal text-muted-foreground">Base recurring rate</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2.5 items-end">
-                <div className="flex flex-col justify-end">
-                  <Label htmlFor="unit-rent" className="text-xs min-h-[2rem] flex items-end pb-1 font-medium">
-                    Cold Rent / Kaltmiete ({currency})
-                  </Label>
+            {/* ── AIRBNB LISTING CONFIGURATION ────────────────────────── */}
+            {type === "airbnb" && (
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-4 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-6 items-center justify-center rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                      <Sparkles className="size-3.5" />
+                    </span>
+                    <div>
+                      <h4 className="font-semibold text-xs text-foreground">Airbnb Listing & Guest Setup</h4>
+                      <p className="text-[11px] text-muted-foreground">Short-term rental rates, digital access, and guest guide</p>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                    STR Mode
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2.5">
+                  <div>
+                    <Label htmlFor="ab-rate" className="text-xs">Nightly Rate ({currency})</Label>
+                    <Input
+                      id="ab-rate"
+                      type="number"
+                      value={airbnbNightlyRate}
+                      onChange={(e) => {
+                        setAirbnbNightlyRate(e.target.value);
+                        setMarketRent(e.target.value);
+                      }}
+                      className="h-8 font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-clean" className="text-xs">Cleaning Fee ({currency})</Label>
+                    <Input
+                      id="ab-clean"
+                      type="number"
+                      value={airbnbCleaningFee}
+                      onChange={(e) => setAirbnbCleaningFee(e.target.value)}
+                      className="h-8 font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-guests" className="text-xs">Max Guests</Label>
+                    <Input
+                      id="ab-guests"
+                      type="number"
+                      min="1"
+                      value={airbnbMaxGuests}
+                      onChange={(e) => setAirbnbMaxGuests(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-min-nights" className="text-xs">Min Nights</Label>
+                    <Input
+                      id="ab-min-nights"
+                      type="number"
+                      min="1"
+                      value={airbnbMinNights}
+                      onChange={(e) => setAirbnbMinNights(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <Label htmlFor="ab-checkin" className="text-xs">Check-in Time</Label>
+                    <Input
+                      id="ab-checkin"
+                      value={airbnbCheckInTime}
+                      onChange={(e) => setAirbnbCheckInTime(e.target.value)}
+                      placeholder="e.g. 15:00"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-checkout" className="text-xs">Check-out Time</Label>
+                    <Input
+                      id="ab-checkout"
+                      value={airbnbCheckOutTime}
+                      onChange={(e) => setAirbnbCheckOutTime(e.target.value)}
+                      placeholder="e.g. 11:00"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Digital Lockbox & Wi-Fi */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <Label htmlFor="ab-lockbox" className="text-xs flex items-center gap-1 font-medium">
+                      <KeyRound className="size-3 text-rose-500" /> Keybox Code
+                    </Label>
+                    <Input
+                      id="ab-lockbox"
+                      value={airbnbLockboxCode}
+                      onChange={(e) => setAirbnbLockboxCode(e.target.value)}
+                      placeholder="e.g. 8492"
+                      className="h-8 font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-wifi-name" className="text-xs flex items-center gap-1 font-medium">
+                      <Wifi className="size-3 text-sky-500" /> Wi-Fi Network
+                    </Label>
+                    <Input
+                      id="ab-wifi-name"
+                      value={airbnbWifiSsid}
+                      onChange={(e) => setAirbnbWifiSsid(e.target.value)}
+                      placeholder="e.g. Guest_WiFi"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-wifi-pass" className="text-xs font-medium">Wi-Fi Password</Label>
+                    <Input
+                      id="ab-wifi-pass"
+                      value={airbnbWifiPassword}
+                      onChange={(e) => setAirbnbWifiPassword(e.target.value)}
+                      placeholder="e.g. secret123"
+                      className="h-8 font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="ab-url" className="text-xs">Airbnb Listing URL / Link</Label>
                   <Input
-                    id="unit-rent"
-                    type="number"
-                    value={marketRent}
-                    onChange={(e) => {
-                      setMarketRent(e.target.value);
-                      if (!leaseRent || leaseRent === "0") setLeaseRent(e.target.value);
-                    }}
+                    id="ab-url"
+                    value={airbnbListingUrl}
+                    onChange={(e) => setAirbnbListingUrl(e.target.value)}
+                    placeholder="https://airbnb.com/rooms/12345678"
                     className="h-8 text-xs font-mono"
                   />
                 </div>
-                <div className="flex flex-col justify-end">
-                  <Label htmlFor="unit-op-cost" className="text-xs min-h-[2rem] flex items-end pb-1 font-medium">
-                    Monthly Nebenkosten ({currency})
-                  </Label>
-                  <Input
-                    id="unit-op-cost"
-                    type="number"
-                    value={monthlyOperatingCost}
-                    onChange={(e) => {
-                      setMonthlyOperatingCost(e.target.value);
-                      if (!operatingAdvance || operatingAdvance === "0") setOperatingAdvance(e.target.value);
-                    }}
-                    placeholder="0"
-                    className="h-8 text-xs font-mono"
-                  />
-                </div>
-                <div className="flex flex-col justify-end">
-                  <Label className="text-xs min-h-[2rem] flex items-end pb-1 font-medium text-muted-foreground">
-                    Total Gross (Warmmiete)
-                  </Label>
-                  <div className="flex h-8 w-full items-center justify-center rounded-md border border-input bg-muted/30 px-2 text-xs font-bold font-mono text-foreground">
-                    {formatMoney((parseFloat(marketRent) || 0) + (parseFloat(monthlyOperatingCost) || 0), currency)}
-                    <span className="text-[10px] font-normal text-muted-foreground ml-1">/mo</span>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <Label htmlFor="ab-rules" className="text-xs">House Rules</Label>
+                    <Textarea
+                      id="ab-rules"
+                      value={airbnbHouseRules}
+                      onChange={(e) => setAirbnbHouseRules(e.target.value)}
+                      placeholder="e.g. No smoking. Quiet hours 22:00-08:00. No parties."
+                      rows={2}
+                      className="text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="ab-checkout-inst" className="text-xs">Check-out Instructions</Label>
+                    <Textarea
+                      id="ab-checkout-inst"
+                      value={airbnbCheckOutInstructions}
+                      onChange={(e) => setAirbnbCheckOutInstructions(e.target.value)}
+                      placeholder="e.g. Leave keys in lockbox, strip bed linens, take trash out."
+                      rows={2}
+                      className="text-xs"
+                    />
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* ── TENANT ASSIGNMENT SECTION ────────────────────────────────── */}
-            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+            {/* Monthly Rent & Operating Prepayments (3 Columns) - for residential/commercial */}
+            {type !== "airbnb" && (
+              <div className="rounded-lg border bg-muted/10 p-3 space-y-2">
+                <div className="text-xs font-semibold text-foreground flex items-center justify-between">
+                  <span>Monthly Rent & Operating Prepayment (Miete & Nebenkosten)</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">Base recurring rate</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5 items-end">
+                  <div className="flex flex-col justify-end">
+                    <Label htmlFor="unit-rent" className="text-xs min-h-[2rem] flex items-end pb-1 font-medium">
+                      Cold Rent / Kaltmiete ({currency})
+                    </Label>
+                    <Input
+                      id="unit-rent"
+                      type="number"
+                      value={marketRent}
+                      onChange={(e) => {
+                        setMarketRent(e.target.value);
+                        if (!leaseRent || leaseRent === "0") setLeaseRent(e.target.value);
+                      }}
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <Label htmlFor="unit-op-cost" className="text-xs min-h-[2rem] flex items-end pb-1 font-medium">
+                      Monthly Nebenkosten ({currency})
+                    </Label>
+                    <Input
+                      id="unit-op-cost"
+                      type="number"
+                      value={monthlyOperatingCost}
+                      onChange={(e) => {
+                        setMonthlyOperatingCost(e.target.value);
+                        if (!operatingAdvance || operatingAdvance === "0") setOperatingAdvance(e.target.value);
+                      }}
+                      placeholder="0"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <Label className="text-xs min-h-[2rem] flex items-end pb-1 font-medium text-muted-foreground">
+                      Total Gross (Warmmiete)
+                    </Label>
+                    <div className="flex h-8 w-full items-center justify-center rounded-md border border-input bg-muted/30 px-2 text-xs font-bold font-mono text-foreground">
+                      {formatMoney((parseFloat(marketRent) || 0) + (parseFloat(monthlyOperatingCost) || 0), currency)}
+                      <span className="text-[10px] font-normal text-muted-foreground ml-1">/mo</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── TENANT ASSIGNMENT OR AIRBNB RESERVATIONS ────────────────── */}
+            {type === "airbnb" ? (
+              <div className="rounded-lg border border-rose-500/25 bg-muted/15 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-rose-500/10 text-rose-500">
+                      <Calendar className="size-3.5" />
+                    </span>
+                    <div>
+                      <span className="font-semibold text-xs text-foreground block">
+                        Airbnb Guest Stays & Reservations
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        Short-term booking management
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setActiveUnitBooking(unitBookings[0] || null);
+                        setGuestPackOpen(true);
+                      }}
+                      className="h-7 text-xs gap-1"
+                    >
+                      <KeyRound className="size-3 text-rose-500" /> Welcome Pack
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setBookingDialogOpen(true)}
+                      className="h-7 text-xs bg-rose-600 hover:bg-rose-700 text-white gap-1"
+                    >
+                      <Plus className="size-3" /> Add Booking
+                    </Button>
+                  </div>
+                </div>
+
+                {unitBookings.length === 0 ? (
+                  <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+                    No reservations logged for this unit yet. Click <strong>Add Booking</strong> to record guest stays.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {unitBookings.map((b) => (
+                      <div
+                        key={b.id}
+                        className="flex items-center justify-between rounded-md border bg-card p-2 text-xs"
+                      >
+                        <div>
+                          <div className="font-semibold text-foreground flex items-center gap-1.5">
+                            {b.guest_name}
+                            <span className="rounded-sm bg-muted px-1.5 py-0.2 text-[10px] text-muted-foreground font-mono">
+                              {b.confirmation_code || b.platform}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {formatDate(b.check_in_date)} → {formatDate(b.check_out_date)} ({b.nights} {b.nights === 1 ? "night" : "nights"})
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-foreground">
+                            {formatMoney(b.net_payout, currency)}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                              b.booking_status === "checked_in"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {b.booking_status.replace("_", " ")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4 text-primary" />
@@ -646,6 +970,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
                 </div>
               )}
             </div>
+          )}
 
             {/* ── YEARLY OPERATING COST SETTLEMENT COMPARISON ──────────────── */}
             {unit && (
@@ -902,6 +1227,32 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
           propertyName={costsSummary.property_name}
           year={settlementYear}
           totalPropertySqft={costsSummary.total_sqft}
+        />
+      )}
+
+      {/* Airbnb Booking Dialog */}
+      {unit && (
+        <BookingDialog
+          open={bookingDialogOpen}
+          onOpenChange={(o) => {
+            setBookingDialogOpen(o);
+            if (!o) loadBookings();
+          }}
+          defaultUnitId={unit.id}
+          onSaved={() => {
+            loadBookings();
+            onSaved?.();
+          }}
+        />
+      )}
+
+      {/* Guest Welcome & Check-In Pack */}
+      {unit && (
+        <GuestPackDialog
+          open={guestPackOpen}
+          onOpenChange={setGuestPackOpen}
+          unit={unit}
+          booking={activeUnitBooking || undefined}
         />
       )}
     </>

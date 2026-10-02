@@ -109,15 +109,17 @@ export async function getKeycloakConfig(c: Context<ServerEnv>): Promise<Keycloak
     return fallback;
   };
 
+  const enabled = getBool("keycloak_enabled", "KEYCLOAK_ENABLED", DEFAULT_CONFIG.enabled);
   const rawUrl = getVal("keycloak_url", "KEYCLOAK_URL", DEFAULT_CONFIG.url);
   const realm = getVal("keycloak_realm", "KEYCLOAK_REALM", DEFAULT_CONFIG.realm);
   const clientId = getVal("keycloak_client_id", "KEYCLOAK_CLIENT_ID", DEFAULT_CONFIG.clientId);
+  const authRequired = getBool("keycloak_required", "KEYCLOAK_REQUIRED", DEFAULT_CONFIG.authRequired);
   return {
-    enabled: true,
+    enabled,
     url: cleanUrl(rawUrl),
     realm,
     clientId,
-    authRequired: true,
+    authRequired,
   };
 }
 

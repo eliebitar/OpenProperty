@@ -22,6 +22,7 @@ const TYPES: { value: PropertyType; label: string }[] = [
   { value: "condo", label: "Condo" },
   { value: "townhouse", label: "Townhouse" },
   { value: "commercial", label: "Commercial" },
+  { value: "airbnb", label: "Airbnb / Vacation Rental" },
 ];
 
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];

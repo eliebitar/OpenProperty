@@ -14,6 +14,9 @@ import type {
   NewLease,
   NewWorkOrder,
   NewVendor,
+  AirbnbBooking,
+  NewAirbnbBooking,
+  AirbnbAnalytics,
 } from "../types";
 
 export interface AppSettings {
@@ -111,6 +114,11 @@ export function useAppState() {
     const path = propertyId ? `/api/units?property_id=${propertyId}` : "/api/units";
     const data = await api<{ units: Unit[] }>("GET", path);
     return data.units;
+  }, []);
+
+  const getUnit = useCallback(async (id: number): Promise<Unit> => {
+    const data = await api<{ unit: Unit }>("GET", `/api/units/${id}`);
+    return data.unit;
   }, []);
 
   const createUnit = useCallback(async (data: NewUnit) => {
@@ -227,10 +235,11 @@ export function useAppState() {
 
   // Work order mutations ───────────────────────────────────────────
 
-  const listWorkOrders = useCallback(async (params?: { status?: string; property_id?: number }): Promise<WorkOrder[]> => {
+  const listWorkOrders = useCallback(async (params?: { status?: string; property_id?: number; unit_id?: number }): Promise<WorkOrder[]> => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.property_id) qs.set("property_id", String(params.property_id));
+    if (params?.unit_id) qs.set("unit_id", String(params.unit_id));
     const path = qs.toString() ? `/api/work-orders?${qs.toString()}` : "/api/work-orders";
     const data = await api<{ work_orders: WorkOrder[] }>("GET", path);
     return data.work_orders;
@@ -250,6 +259,53 @@ export function useAppState() {
     await api("DELETE", `/api/work-orders/${id}`);
   }, []);
 
+  // Airbnb mutations ───────────────────────────────────────────────
+
+  const listAirbnbBookings = useCallback(async (params?: {
+    unit_id?: number;
+    property_id?: number;
+    status?: string;
+    payout_status?: string;
+    q?: string;
+  }): Promise<AirbnbBooking[]> => {
+    const qs = new URLSearchParams();
+    if (params?.unit_id) qs.set("unit_id", String(params.unit_id));
+    if (params?.property_id) qs.set("property_id", String(params.property_id));
+    if (params?.status) qs.set("status", params.status);
+    if (params?.payout_status) qs.set("payout_status", params.payout_status);
+    if (params?.q) qs.set("q", params.q);
+    const path = qs.toString() ? `/api/airbnb/bookings?${qs.toString()}` : "/api/airbnb/bookings";
+    const data = await api<{ bookings: AirbnbBooking[] }>("GET", path);
+    return data.bookings;
+  }, []);
+
+  const createAirbnbBooking = useCallback(async (data: NewAirbnbBooking): Promise<AirbnbBooking> => {
+    const res = await api<{ booking: AirbnbBooking }>("POST", "/api/airbnb/bookings", data);
+    await refreshLookups();
+    return res.booking;
+  }, [refreshLookups]);
+
+  const updateAirbnbBooking = useCallback(async (id: number, patch: Partial<NewAirbnbBooking>): Promise<AirbnbBooking> => {
+    const res = await api<{ booking: AirbnbBooking }>("PUT", `/api/airbnb/bookings/${id}`, patch);
+    await refreshLookups();
+    return res.booking;
+  }, [refreshLookups]);
+
+  const deleteAirbnbBooking = useCallback(async (id: number) => {
+    await api("DELETE", `/api/airbnb/bookings/${id}`);
+    await refreshLookups();
+  }, [refreshLookups]);
+
+  const scheduleTurnoverCleaning = useCallback(async (bookingId: number): Promise<WorkOrder> => {
+    const res = await api<{ ok: boolean; work_order: WorkOrder }>("POST", `/api/airbnb/bookings/${bookingId}/schedule-cleaning`);
+    return res.work_order;
+  }, []);
+
+  const getAirbnbAnalytics = useCallback(async (propertyId?: number): Promise<AirbnbAnalytics> => {
+    const path = propertyId ? `/api/airbnb/analytics?property_id=${propertyId}` : "/api/airbnb/analytics";
+    return await api<AirbnbAnalytics>("GET", path);
+  }, []);
+
   return {
     // data
     properties, vendors, settings,
@@ -260,7 +316,7 @@ export function useAppState() {
     updateSettings,
     // properties / units
     createProperty, updateProperty, deleteProperty,
-    listUnits, createUnit, updateUnit, deleteUnit,
+    listUnits, getUnit, createUnit, updateUnit, deleteUnit,
     // tenants
     listTenants, createTenant, updateTenant, deleteTenant,
     // leases
@@ -271,6 +327,9 @@ export function useAppState() {
     createVendor, updateVendor, deleteVendor,
     // work orders
     listWorkOrders, createWorkOrder, updateWorkOrder, deleteWorkOrder,
+    // airbnb
+    listAirbnbBookings, createAirbnbBooking, updateAirbnbBooking, deleteAirbnbBooking,
+    scheduleTurnoverCleaning, getAirbnbAnalytics,
   };
 }
 

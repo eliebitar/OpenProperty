@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS properties (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  type TEXT NOT NULL DEFAULT 'single_family',  -- 'single_family' | 'multi_family' | 'condo' | 'townhouse' | 'commercial'
+  type TEXT NOT NULL DEFAULT 'single_family',  -- 'single_family' | 'multi_family' | 'condo' | 'townhouse' | 'commercial' | 'airbnb'
   address TEXT,
   city TEXT,
   state TEXT,
@@ -28,13 +28,25 @@ CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
   name TEXT NOT NULL,                          -- e.g. 'Unit 1A', '308', 'Main house'
-  type TEXT NOT NULL DEFAULT 'residential',    -- 'residential' | 'commercial'
+  type TEXT NOT NULL DEFAULT 'residential',    -- 'residential' | 'commercial' | 'airbnb'
   bedrooms REAL NOT NULL DEFAULT 1,            -- studio = 0, allows half-beds (rare)
   bathrooms REAL NOT NULL DEFAULT 1,           -- allows half-baths (1.5)
   sqft INTEGER,
   market_rent REAL NOT NULL DEFAULT 0,
   monthly_operating_cost REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'vacant',       -- 'vacant' | 'occupied' | 'turnover' | 'unavailable'
+  airbnb_nightly_rate REAL NOT NULL DEFAULT 0,
+  airbnb_cleaning_fee REAL NOT NULL DEFAULT 0,
+  airbnb_max_guests INTEGER NOT NULL DEFAULT 2,
+  airbnb_min_nights INTEGER NOT NULL DEFAULT 1,
+  airbnb_check_in_time TEXT NOT NULL DEFAULT '15:00',
+  airbnb_check_out_time TEXT NOT NULL DEFAULT '11:00',
+  airbnb_wifi_ssid TEXT,
+  airbnb_wifi_password TEXT,
+  airbnb_lockbox_code TEXT,
+  airbnb_listing_url TEXT,
+  airbnb_house_rules TEXT,
+  airbnb_check_out_instructions TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -198,3 +210,34 @@ CREATE TABLE IF NOT EXISTS nebenkosten_statements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nk_statements_lease ON nebenkosten_statements(lease_id);
+
+-- ── Airbnb Bookings (Short-term rental reservations) ─────────────
+CREATE TABLE IF NOT EXISTS airbnb_bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  guest_name TEXT NOT NULL,
+  guest_email TEXT,
+  guest_phone TEXT,
+  num_guests INTEGER NOT NULL DEFAULT 1,
+  check_in_date TEXT NOT NULL,                     -- 'YYYY-MM-DD'
+  check_out_date TEXT NOT NULL,                    -- 'YYYY-MM-DD'
+  nights INTEGER NOT NULL DEFAULT 1,
+  nightly_rate REAL NOT NULL DEFAULT 0,
+  total_nights_amount REAL NOT NULL DEFAULT 0,
+  cleaning_fee REAL NOT NULL DEFAULT 0,
+  platform_fee REAL NOT NULL DEFAULT 0,            -- e.g. Airbnb host fee (~3%)
+  tax_amount REAL NOT NULL DEFAULT 0,              -- Tourist / occupancy tax
+  gross_amount REAL NOT NULL DEFAULT 0,            -- Total charged to guest
+  net_payout REAL NOT NULL DEFAULT 0,              -- Host payout received
+  payout_status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'received' | 'refunded'
+  payout_date TEXT,
+  booking_status TEXT NOT NULL DEFAULT 'confirmed',-- 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled'
+  platform TEXT NOT NULL DEFAULT 'airbnb',         -- 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
+  confirmation_code TEXT,                          -- e.g. 'HM84920'
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_unit ON airbnb_bookings(unit_id);
+CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_dates ON airbnb_bookings(check_in_date, check_out_date);
+CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_status ON airbnb_bookings(booking_status);

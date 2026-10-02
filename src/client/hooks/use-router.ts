@@ -4,10 +4,12 @@ export type Route =
   | { name: "dashboard" }
   | { name: "properties" }
   | { name: "property"; id: number }
+  | { name: "unit"; id: number; propertyId?: number }
   | { name: "tenants" }
   | { name: "tenant"; id: number }
   | { name: "leases" }
   | { name: "rent" }
+  | { name: "airbnb" }
   | { name: "maintenance" }
   | { name: "settings" }
   | { name: "not-found" };
@@ -15,13 +17,18 @@ export type Route =
 function parse(path: string): Route {
   if (path === "/" || path === "/dashboard") return { name: "dashboard" };
   if (path === "/properties") return { name: "properties" };
-  let m = path.match(/^\/properties\/(\d+)$/);
+  let m = path.match(/^\/properties\/(\d+)\/units\/(\d+)$/);
+  if (m) return { name: "unit", propertyId: parseInt(m[1], 10), id: parseInt(m[2], 10) };
+  m = path.match(/^\/units\/(\d+)$/);
+  if (m) return { name: "unit", id: parseInt(m[1], 10) };
+  m = path.match(/^\/properties\/(\d+)$/);
   if (m) return { name: "property", id: parseInt(m[1], 10) };
   if (path === "/tenants") return { name: "tenants" };
   m = path.match(/^\/tenants\/(\d+)$/);
   if (m) return { name: "tenant", id: parseInt(m[1], 10) };
   if (path === "/leases") return { name: "leases" };
   if (path === "/rent") return { name: "rent" };
+  if (path === "/airbnb") return { name: "airbnb" };
   if (path === "/maintenance") return { name: "maintenance" };
   if (path === "/settings") return { name: "settings" };
   return { name: "not-found" };

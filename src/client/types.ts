@@ -1,6 +1,6 @@
 // ── Core entities ──────────────────────────────────────────────────
 
-export type PropertyType = "single_family" | "multi_family" | "condo" | "townhouse" | "commercial";
+export type PropertyType = "single_family" | "multi_family" | "condo" | "townhouse" | "commercial" | "airbnb";
 
 export interface Property {
   id: number;
@@ -19,19 +19,32 @@ export interface Property {
   occupied_count?: number;
 }
 
+export type UnitType = "residential" | "commercial" | "airbnb";
 export type UnitStatus = "vacant" | "occupied" | "turnover" | "unavailable";
 
 export interface Unit {
   id: number;
   property_id: number;
   name: string;
-  type: string;
+  type: UnitType | string;
   bedrooms: number;
   bathrooms: number;
   sqft: number | null;
   market_rent: number;
   monthly_operating_cost?: number;
   status: UnitStatus;
+  airbnb_nightly_rate?: number;
+  airbnb_cleaning_fee?: number;
+  airbnb_max_guests?: number;
+  airbnb_min_nights?: number;
+  airbnb_check_in_time?: string | null;
+  airbnb_check_out_time?: string | null;
+  airbnb_wifi_ssid?: string | null;
+  airbnb_wifi_password?: string | null;
+  airbnb_lockbox_code?: string | null;
+  airbnb_listing_url?: string | null;
+  airbnb_house_rules?: string | null;
+  airbnb_check_out_instructions?: string | null;
   notes: string | null;
   created_at: string;
   // Joined
@@ -45,6 +58,10 @@ export interface Unit {
   active_rent?: number | null;
   active_operating_advance?: number | null;
   active_heating_advance?: number | null;
+  current_airbnb_booking_id?: number | null;
+  current_airbnb_guest_name?: string | null;
+  current_airbnb_check_out?: string | null;
+  airbnb_upcoming_bookings_count?: number | null;
 }
 
 export interface Tenant {
@@ -168,6 +185,7 @@ export interface WorkOrder {
   tenant_first_name?: string | null;
   tenant_last_name?: string | null;
   vendor_name?: string | null;
+  vendor_category?: VendorCategory | string | null;
   vendor_color?: string | null;
 }
 
@@ -205,6 +223,10 @@ export interface DashboardSummary {
   overdue_count: number;
   open_work_orders: number;
   urgent_work_orders: number;
+  airbnb_units?: number;
+  airbnb_active_guests?: number;
+  airbnb_month_revenue?: number;
+  airbnb_upcoming_checkins?: number;
   recent_work_orders: {
     id: number; title: string; priority: string; status: string;
     property_name: string | null; unit_name: string | null; created_at: string;
@@ -259,7 +281,7 @@ export interface CostAllocationItem {
 export interface UnitOperatingCostBreakdown {
   unit_id: number;
   unit_name: string;
-  unit_type: "residential" | "commercial";
+  unit_type: "residential" | "commercial" | "airbnb";
   sqft: number;
   sqft_share_pct: number;
   allocated_cost: number;
@@ -290,3 +312,77 @@ export interface OperatingCostsSummary {
   costs: OperatingCost[];
   units: UnitOperatingCostBreakdown[];
 }
+
+// ── Airbnb & Short-term rentals ────────────────────────────────────
+
+export type BookingStatus = "confirmed" | "checked_in" | "checked_out" | "cancelled";
+export type PayoutStatus = "pending" | "received" | "refunded";
+export type BookingPlatform = "airbnb" | "vrbo" | "booking_com" | "direct" | "other";
+
+export interface AirbnbBooking {
+  id: number;
+  unit_id: number;
+  guest_name: string;
+  guest_email: string | null;
+  guest_phone: string | null;
+  num_guests: number;
+  check_in_date: string;
+  check_out_date: string;
+  nights: number;
+  nightly_rate: number;
+  total_nights_amount: number;
+  cleaning_fee: number;
+  platform_fee: number;
+  tax_amount: number;
+  gross_amount: number;
+  net_payout: number;
+  payout_status: PayoutStatus;
+  payout_date: string | null;
+  booking_status: BookingStatus;
+  platform: BookingPlatform;
+  confirmation_code: string | null;
+  notes: string | null;
+  created_at: string;
+  // Joined
+  unit_name?: string | null;
+  property_id?: number | null;
+  property_name?: string | null;
+  property_color?: string | null;
+  property_address?: string | null;
+  property_city?: string | null;
+  lockbox_code?: string | null;
+  wifi_ssid?: string | null;
+  wifi_password?: string | null;
+  check_in_time?: string | null;
+  check_out_time?: string | null;
+  house_rules?: string | null;
+}
+
+export type NewAirbnbBooking = Partial<Omit<AirbnbBooking, "id" | "created_at" | "unit_name" | "property_id" | "property_name" | "property_color" | "property_address" | "property_city" | "lockbox_code" | "wifi_ssid" | "wifi_password" | "check_in_time" | "check_out_time" | "house_rules">> & {
+  unit_id: number;
+  guest_name: string;
+  check_in_date: string;
+  check_out_date: string;
+};
+
+export interface AirbnbAnalytics {
+  total_revenue: number;
+  total_bookings: number;
+  active_stays: number;
+  upcoming_check_ins_7d: number;
+  upcoming_check_outs_7d: number;
+  average_daily_rate: number;
+  occupancy_rate: number;
+  revenue_by_month: { month: string; revenue: number; nights: number }[];
+  units_summary: {
+    unit_id: number;
+    unit_name: string;
+    property_id: number;
+    property_name: string;
+    bookings_count: number;
+    revenue: number;
+    occupancy_rate: number;
+    current_guest: string | null;
+  }[];
+}
+

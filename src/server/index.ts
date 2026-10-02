@@ -70,6 +70,55 @@ async function ensureSeeded(): Promise<void> {
       // Column already exists
     }
 
+    const unitCols = [
+      "ALTER TABLE units ADD COLUMN airbnb_nightly_rate REAL NOT NULL DEFAULT 0",
+      "ALTER TABLE units ADD COLUMN airbnb_cleaning_fee REAL NOT NULL DEFAULT 0",
+      "ALTER TABLE units ADD COLUMN airbnb_max_guests INTEGER NOT NULL DEFAULT 2",
+      "ALTER TABLE units ADD COLUMN airbnb_min_nights INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE units ADD COLUMN airbnb_check_in_time TEXT NOT NULL DEFAULT '15:00'",
+      "ALTER TABLE units ADD COLUMN airbnb_check_out_time TEXT NOT NULL DEFAULT '11:00'",
+      "ALTER TABLE units ADD COLUMN airbnb_wifi_ssid TEXT",
+      "ALTER TABLE units ADD COLUMN airbnb_wifi_password TEXT",
+      "ALTER TABLE units ADD COLUMN airbnb_lockbox_code TEXT",
+      "ALTER TABLE units ADD COLUMN airbnb_listing_url TEXT",
+      "ALTER TABLE units ADD COLUMN airbnb_house_rules TEXT",
+      "ALTER TABLE units ADD COLUMN airbnb_check_out_instructions TEXT",
+    ];
+    for (const sql of unitCols) {
+      try { await run(sql); } catch { /* Column already exists */ }
+    }
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS airbnb_bookings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+        guest_name TEXT NOT NULL,
+        guest_email TEXT,
+        guest_phone TEXT,
+        num_guests INTEGER NOT NULL DEFAULT 1,
+        check_in_date TEXT NOT NULL,
+        check_out_date TEXT NOT NULL,
+        nights INTEGER NOT NULL DEFAULT 1,
+        nightly_rate REAL NOT NULL DEFAULT 0,
+        total_nights_amount REAL NOT NULL DEFAULT 0,
+        cleaning_fee REAL NOT NULL DEFAULT 0,
+        platform_fee REAL NOT NULL DEFAULT 0,
+        tax_amount REAL NOT NULL DEFAULT 0,
+        gross_amount REAL NOT NULL DEFAULT 0,
+        net_payout REAL NOT NULL DEFAULT 0,
+        payout_status TEXT NOT NULL DEFAULT 'pending',
+        payout_date TEXT,
+        booking_status TEXT NOT NULL DEFAULT 'confirmed',
+        platform TEXT NOT NULL DEFAULT 'airbnb',
+        confirmation_code TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_unit ON airbnb_bookings(unit_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_dates ON airbnb_bookings(check_in_date, check_out_date)");
+    await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_status ON airbnb_bookings(booking_status)");
+
     const props = await get<{ n: number }>("SELECT COUNT(*) AS n FROM properties");
     if ((props?.n ?? 0) === 0) {
       const ids: number[] = [];
@@ -97,6 +146,91 @@ async function ensureSeeded(): Promise<void> {
     if ((vendors?.n ?? 0) === 0) {
       for (const v of DEMO_VENDORS) {
         await run("INSERT INTO vendors (name, category, phone, color) VALUES (?, ?, ?, ?)", v);
+      }
+      await run("INSERT INTO vendors (name, category, phone, color) VALUES (?, ?, ?, ?)", [
+        "Sparkle Clean Turnover Services",
+        "cleaning",
+        "512-555-0199",
+        "teal",
+      ]);
+    }
+
+    // Seed demo Airbnb unit and bookings if no airbnb units exist yet
+    const airbnbUnitsCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE type = 'airbnb'");
+    if ((airbnbUnitsCount?.n ?? 0) === 0) {
+      const targetProp = await get<{ id: number }>("SELECT id FROM properties ORDER BY id ASC LIMIT 1");
+      if (targetProp?.id) {
+        const uRes = await run(
+          `INSERT INTO units (
+            property_id, name, type, bedrooms, bathrooms, sqft, market_rent, status,
+            airbnb_nightly_rate, airbnb_cleaning_fee, airbnb_max_guests, airbnb_min_nights,
+            airbnb_check_in_time, airbnb_check_out_time, airbnb_wifi_ssid, airbnb_wifi_password,
+            airbnb_lockbox_code, airbnb_listing_url, airbnb_house_rules, airbnb_check_out_instructions
+          ) VALUES (?, ?, 'airbnb', ?, ?, ?, ?, 'occupied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetProp.id,
+            "Suite 4B - Designer Loft (Airbnb)",
+            1, 1, 60, 130,
+            130, 50, 3, 2,
+            "15:00", "11:00",
+            "OpenProperty_Loft4", "SuperHost2026",
+            "4819", "https://airbnb.com/rooms/sample-suite-4b",
+            "No smoking. Quiet hours 22:00-08:00. No unauthorized parties.",
+            "Please turn off lights & AC, leave keys in lockbox, and take trash out.",
+          ],
+        );
+        const airbnbUnitId = uRes.lastInsertRowid;
+        if (airbnbUnitId) {
+          const now = new Date();
+          const dPastIn = new Date(now.getTime() - 10 * 86400000).toISOString().slice(0, 10);
+          const dPastOut = new Date(now.getTime() - 6 * 86400000).toISOString().slice(0, 10);
+          const dCurrIn = new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+          const dCurrOut = new Date(now.getTime() + 2 * 86400000).toISOString().slice(0, 10);
+          const dNextIn = new Date(now.getTime() + 5 * 86400000).toISOString().slice(0, 10);
+          const dNextOut = new Date(now.getTime() + 9 * 86400000).toISOString().slice(0, 10);
+
+          await run(
+            `INSERT INTO airbnb_bookings (
+              unit_id, guest_name, guest_email, guest_phone, num_guests,
+              check_in_date, check_out_date, nights, nightly_rate, total_nights_amount,
+              cleaning_fee, platform_fee, tax_amount, gross_amount, net_payout,
+              payout_status, payout_date, booking_status, platform, confirmation_code, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              airbnbUnitId, "Sophie Laurent", "sophie.laurent@example.fr", "+33 6 12 34 56 78", 2,
+              dPastIn, dPastOut, 4, 130, 520, 50, 15.6, 25, 595, 554.4,
+              "received", dPastIn, "checked_out", "airbnb", "HM-FR78921", "Visiting for design conference.",
+            ],
+          );
+
+          await run(
+            `INSERT INTO airbnb_bookings (
+              unit_id, guest_name, guest_email, guest_phone, num_guests,
+              check_in_date, check_out_date, nights, nightly_rate, total_nights_amount,
+              cleaning_fee, platform_fee, tax_amount, gross_amount, net_payout,
+              payout_status, payout_date, booking_status, platform, confirmation_code, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              airbnbUnitId, "Liam & Olivia Chen", "liam.chen@example.com", "+1 512 555 9012", 2,
+              dCurrIn, dCurrOut, 4, 130, 520, 50, 15.6, 25, 595, 554.4,
+              "received", dCurrIn, "checked_in", "airbnb", "HM-US41289", "Anniversary trip. Requested early check-in.",
+            ],
+          );
+
+          await run(
+            `INSERT INTO airbnb_bookings (
+              unit_id, guest_name, guest_email, guest_phone, num_guests,
+              check_in_date, check_out_date, nights, nightly_rate, total_nights_amount,
+              cleaning_fee, platform_fee, tax_amount, gross_amount, net_payout,
+              payout_status, payout_date, booking_status, platform, confirmation_code, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              airbnbUnitId, "David Miller", "david.m@example.org", "+44 7911 123456", 1,
+              dNextIn, dNextOut, 4, 130, 520, 50, 15.6, 25, 595, 554.4,
+              "pending", null, "confirmed", "airbnb", "HM-UK90234", "Business traveler.",
+            ],
+          );
+        }
       }
     }
   } catch {
@@ -139,7 +273,7 @@ function buildUpdate(fields: Record<string, unknown>): { sets: string[]; params:
 
 const PropertyInput = z.object({
   name: z.string().min(1),
-  type: z.enum(["single_family", "multi_family", "condo", "townhouse", "commercial"]).optional(),
+  type: z.enum(["single_family", "multi_family", "condo", "townhouse", "commercial", "airbnb"]).optional(),
   address: z.string().optional().nullable(),
   city: z.string().optional().nullable(),
   state: z.string().optional().nullable(),
@@ -207,13 +341,25 @@ app.delete("/api/properties/:id", async (c) => {
 const UnitInput = z.object({
   property_id: z.number().int(),
   name: z.string().min(1),
-  type: z.enum(["residential", "commercial"]).optional(),
+  type: z.enum(["residential", "commercial", "airbnb"]).optional(),
   bedrooms: z.number().min(0).optional(),
   bathrooms: z.number().min(0).optional(),
   sqft: z.number().int().optional().nullable(),
   market_rent: z.number().min(0).optional(),
   monthly_operating_cost: z.number().min(0).optional(),
   status: z.enum(["vacant", "occupied", "turnover", "unavailable"]).optional(),
+  airbnb_nightly_rate: z.number().min(0).optional().nullable(),
+  airbnb_cleaning_fee: z.number().min(0).optional().nullable(),
+  airbnb_max_guests: z.number().int().min(1).optional().nullable(),
+  airbnb_min_nights: z.number().int().min(1).optional().nullable(),
+  airbnb_check_in_time: z.string().optional().nullable(),
+  airbnb_check_out_time: z.string().optional().nullable(),
+  airbnb_wifi_ssid: z.string().optional().nullable(),
+  airbnb_wifi_password: z.string().optional().nullable(),
+  airbnb_lockbox_code: z.string().optional().nullable(),
+  airbnb_listing_url: z.string().optional().nullable(),
+  airbnb_house_rules: z.string().optional().nullable(),
+  airbnb_check_out_instructions: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -228,7 +374,11 @@ const UNIT_SELECT = `
     (SELECT t.first_name || ' ' || t.last_name FROM leases l LEFT JOIN tenants t ON t.id = l.primary_tenant_id WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_name,
     (SELECT l.monthly_rent FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_rent,
     (SELECT l.operating_cost_advance FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_operating_advance,
-    (SELECT l.heating_cost_advance FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_heating_advance
+    (SELECT l.heating_cost_advance FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_heating_advance,
+    (SELECT b.id FROM airbnb_bookings b WHERE b.unit_id = u.id AND b.booking_status IN ('confirmed', 'checked_in') AND b.check_in_date <= date('now') AND b.check_out_date >= date('now') ORDER BY b.check_in_date DESC LIMIT 1) as current_airbnb_booking_id,
+    (SELECT b.guest_name FROM airbnb_bookings b WHERE b.unit_id = u.id AND b.booking_status IN ('confirmed', 'checked_in') AND b.check_in_date <= date('now') AND b.check_out_date >= date('now') ORDER BY b.check_in_date DESC LIMIT 1) as current_airbnb_guest_name,
+    (SELECT b.check_out_date FROM airbnb_bookings b WHERE b.unit_id = u.id AND b.booking_status IN ('confirmed', 'checked_in') AND b.check_in_date <= date('now') AND b.check_out_date >= date('now') ORDER BY b.check_in_date DESC LIMIT 1) as current_airbnb_check_out,
+    (SELECT COUNT(*) FROM airbnb_bookings b WHERE b.unit_id = u.id AND b.booking_status != 'cancelled' AND b.check_out_date >= date('now')) as airbnb_upcoming_bookings_count
   FROM units u
   LEFT JOIN properties p ON p.id = u.property_id
 `;
@@ -258,9 +408,19 @@ app.post("/api/units", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO units (property_id, name, type, bedrooms, bathrooms, sqft, market_rent, monthly_operating_cost, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.property_id, d.name, d.type ?? "residential", d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null, d.market_rent ?? 0, d.monthly_operating_cost ?? 0, d.status ?? "vacant", d.notes ?? null],
+    `INSERT INTO units (
+       property_id, name, type, bedrooms, bathrooms, sqft, market_rent, monthly_operating_cost, status,
+       airbnb_nightly_rate, airbnb_cleaning_fee, airbnb_max_guests, airbnb_min_nights,
+       airbnb_check_in_time, airbnb_check_out_time, airbnb_wifi_ssid, airbnb_wifi_password,
+       airbnb_lockbox_code, airbnb_listing_url, airbnb_house_rules, airbnb_check_out_instructions, notes
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      d.property_id, d.name, d.type ?? "residential", d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null,
+      d.market_rent ?? 0, d.monthly_operating_cost ?? 0, d.status ?? "vacant",
+      d.airbnb_nightly_rate ?? 0, d.airbnb_cleaning_fee ?? 0, d.airbnb_max_guests ?? 2, d.airbnb_min_nights ?? 1,
+      d.airbnb_check_in_time ?? "15:00", d.airbnb_check_out_time ?? "11:00", d.airbnb_wifi_ssid ?? null, d.airbnb_wifi_password ?? null,
+      d.airbnb_lockbox_code ?? null, d.airbnb_listing_url ?? null, d.airbnb_house_rules ?? null, d.airbnb_check_out_instructions ?? null, d.notes ?? null,
+    ],
   );
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [result.lastInsertRowid]);
   return c.json({ unit: row }, 201);
@@ -806,7 +966,7 @@ const WO_SELECT = `
     p.name as property_name, p.color as property_color,
     u.name as unit_name,
     t.first_name as tenant_first_name, t.last_name as tenant_last_name,
-    v.name as vendor_name, v.color as vendor_color
+    v.name as vendor_name, v.category as vendor_category, v.color as vendor_color
   FROM work_orders w
   LEFT JOIN properties p ON p.id = w.property_id
   LEFT JOIN units u ON u.id = w.unit_id
@@ -817,10 +977,12 @@ const WO_SELECT = `
 app.get("/api/work-orders", async (c) => {
   const status = c.req.query("status");
   const propertyId = intParam(c.req.query("property_id"));
+  const unitId = intParam(c.req.query("unit_id"));
   const where: string[] = [];
   const params: unknown[] = [];
   if (status) { where.push("w.status = ?"); params.push(status); }
   if (propertyId) { where.push("w.property_id = ?"); params.push(propertyId); }
+  if (unitId) { where.push("w.unit_id = ?"); params.push(unitId); }
   const sql = `${WO_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY
     CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
     w.created_at DESC`;
@@ -969,6 +1131,10 @@ app.get("/api/dashboard/summary", async (c) => {
     urgentWorkOrders,
     recentWorkOrders,
     upcomingExpirations,
+    airbnbUnitsRow,
+    airbnbActiveGuestsRow,
+    airbnbMonthRevenueRow,
+    airbnbUpcomingCheckinsRow,
   ] = await Promise.all([
     safeGet<{ n: number }>("SELECT COUNT(*) as n FROM properties", [], { n: 0 }),
     safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units", [], { n: 0 }),
@@ -1019,6 +1185,19 @@ app.get("/api/dashboard/summary", async (c) => {
        WHERE l.status = 'active' AND l.end_date <= date('now', '+60 days')
        ORDER BY l.end_date ASC LIMIT 6`,
     ),
+    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE type = 'airbnb'", [], { n: 0 }),
+    safeGet<{ n: number }>(
+      "SELECT COUNT(*) as n FROM airbnb_bookings WHERE booking_status = 'checked_in' OR (booking_status = 'confirmed' AND check_in_date <= date('now') AND check_out_date >= date('now'))",
+      [], { n: 0 },
+    ),
+    safeGet<{ total: number }>(
+      "SELECT COALESCE(SUM(net_payout), 0) as total FROM airbnb_bookings WHERE (payout_date LIKE ? OR check_in_date LIKE ?) AND booking_status != 'cancelled'",
+      [periodNow + "%", periodNow + "%"], { total: 0 },
+    ),
+    safeGet<{ n: number }>(
+      "SELECT COUNT(*) as n FROM airbnb_bookings WHERE check_in_date >= date('now') AND check_in_date <= date('now', '+7 days') AND booking_status != 'cancelled'",
+      [], { n: 0 },
+    ),
   ]);
 
   return c.json({
@@ -1038,6 +1217,10 @@ app.get("/api/dashboard/summary", async (c) => {
     urgent_work_orders: urgentWorkOrders.n,
     recent_work_orders: recentWorkOrders,
     upcoming_expirations: upcomingExpirations,
+    airbnb_units: airbnbUnitsRow.n,
+    airbnb_active_guests: airbnbActiveGuestsRow.n,
+    airbnb_month_revenue: airbnbMonthRevenueRow.total,
+    airbnb_upcoming_checkins: airbnbUpcomingCheckinsRow.n,
   });
 });
 
@@ -1340,7 +1523,7 @@ app.get("/api/properties/:id/operating-costs-summary", async (c) => {
     return {
       unit_id: u.id,
       unit_name: u.name,
-      unit_type: u.type as "residential" | "commercial",
+      unit_type: u.type as "residential" | "commercial" | "airbnb",
       sqft: s,
       sqft_share_pct: Math.round(sqftSharePct * 10) / 10,
       allocated_cost: allocatedCost,
@@ -1461,6 +1644,329 @@ app.get("/api/nebenkosten-statements", async (c) => {
   const leaseId = intParam(c.req.query("lease_id"));
   const rows = await query("SELECT * FROM nebenkosten_statements " + (leaseId ? "WHERE lease_id = ?" : ""), leaseId ? [leaseId] : []);
   return c.json({ statements: rows });
+});
+
+// ── Airbnb & Short-Term Rentals ─────────────────────────────────────
+
+const AirbnbBookingInput = z.object({
+  unit_id: z.number().int(),
+  guest_name: z.string().min(1),
+  guest_email: z.string().optional().nullable(),
+  guest_phone: z.string().optional().nullable(),
+  num_guests: z.number().int().min(1).default(1),
+  check_in_date: z.string().min(1),
+  check_out_date: z.string().min(1),
+  nights: z.number().int().min(1).optional(),
+  nightly_rate: z.number().min(0).optional(),
+  total_nights_amount: z.number().min(0).optional(),
+  cleaning_fee: z.number().min(0).optional(),
+  platform_fee: z.number().min(0).optional(),
+  tax_amount: z.number().min(0).optional(),
+  gross_amount: z.number().min(0).optional(),
+  net_payout: z.number().min(0).optional(),
+  payout_status: z.enum(["pending", "received", "refunded"]).default("pending"),
+  payout_date: z.string().optional().nullable(),
+  booking_status: z.enum(["confirmed", "checked_in", "checked_out", "cancelled"]).default("confirmed"),
+  platform: z.enum(["airbnb", "vrbo", "booking_com", "direct", "other"]).default("airbnb"),
+  confirmation_code: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+const AIRBNB_BOOKING_SELECT = `
+  SELECT b.*,
+    u.name as unit_name,
+    u.airbnb_lockbox_code as lockbox_code,
+    u.airbnb_wifi_ssid as wifi_ssid,
+    u.airbnb_wifi_password as wifi_password,
+    u.airbnb_check_in_time as check_in_time,
+    u.airbnb_check_out_time as check_out_time,
+    u.airbnb_house_rules as house_rules,
+    p.id as property_id,
+    p.name as property_name,
+    p.color as property_color,
+    p.address as property_address,
+    p.city as property_city
+  FROM airbnb_bookings b
+  JOIN units u ON u.id = b.unit_id
+  JOIN properties p ON p.id = u.property_id
+`;
+
+app.get("/api/airbnb/bookings", async (c) => {
+  const unitId = intParam(c.req.query("unit_id"));
+  const propertyId = intParam(c.req.query("property_id"));
+  const status = c.req.query("status");
+  const payoutStatus = c.req.query("payout_status");
+  const q = c.req.query("q")?.trim().toLowerCase();
+
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (unitId) { where.push("b.unit_id = ?"); params.push(unitId); }
+  if (propertyId) { where.push("u.property_id = ?"); params.push(propertyId); }
+  if (status) { where.push("b.booking_status = ?"); params.push(status); }
+  if (payoutStatus) { where.push("b.payout_status = ?"); params.push(payoutStatus); }
+  if (q) {
+    where.push("(LOWER(b.guest_name) LIKE ? OR LOWER(b.confirmation_code) LIKE ? OR LOWER(COALESCE(b.notes, '')) LIKE ?)");
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+
+  const sql = `${AIRBNB_BOOKING_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY b.check_in_date DESC`;
+  const rows = await query(sql, params).catch(() => []);
+  return c.json({ bookings: rows });
+});
+
+app.get("/api/airbnb/bookings/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const row = await get(`${AIRBNB_BOOKING_SELECT} WHERE b.id = ?`, [id]);
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json({ booking: row });
+});
+
+app.post("/api/airbnb/bookings", async (c) => {
+  const parsed = await parseJson(c, AirbnbBookingInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+
+  // Auto calculate nights
+  const start = new Date(d.check_in_date).getTime();
+  const end = new Date(d.check_out_date).getTime();
+  const diffDays = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+  const nights = d.nights ?? diffDays;
+
+  // Get unit defaults if needed
+  const unit = await get<{ airbnb_nightly_rate: number; airbnb_cleaning_fee: number; market_rent: number }>(
+    "SELECT airbnb_nightly_rate, airbnb_cleaning_fee, market_rent FROM units WHERE id = ?",
+    [d.unit_id],
+  );
+  const nightlyRate = d.nightly_rate ?? (unit?.airbnb_nightly_rate || unit?.market_rent || 0);
+  const cleaningFee = d.cleaning_fee ?? (unit?.airbnb_cleaning_fee || 0);
+  const totalNights = d.total_nights_amount ?? (nights * nightlyRate);
+  const taxAmount = d.tax_amount ?? 0;
+  const grossAmount = d.gross_amount ?? (totalNights + cleaningFee + taxAmount);
+  const platformFee = d.platform_fee ?? (d.platform === "airbnb" ? Math.round(totalNights * 0.03 * 100) / 100 : 0);
+  const netPayout = d.net_payout ?? Math.round((grossAmount - platformFee - taxAmount) * 100) / 100;
+  const confirmationCode = d.confirmation_code || `HM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  const result = await run(
+    `INSERT INTO airbnb_bookings (
+      unit_id, guest_name, guest_email, guest_phone, num_guests,
+      check_in_date, check_out_date, nights, nightly_rate, total_nights_amount,
+      cleaning_fee, platform_fee, tax_amount, gross_amount, net_payout,
+      payout_status, payout_date, booking_status, platform, confirmation_code, notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      d.unit_id, d.guest_name, d.guest_email ?? null, d.guest_phone ?? null, d.num_guests,
+      d.check_in_date, d.check_out_date, nights, nightlyRate, totalNights,
+      cleaningFee, platformFee, taxAmount, grossAmount, netPayout,
+      d.payout_status, d.payout_date ?? null, d.booking_status, d.platform, confirmationCode, d.notes ?? null,
+    ],
+  );
+
+  // Sync unit occupancy status if checking in
+  if (d.booking_status === "checked_in") {
+    await run("UPDATE units SET status = 'occupied' WHERE id = ?", [d.unit_id]);
+  } else if (d.booking_status === "checked_out") {
+    await run("UPDATE units SET status = 'turnover' WHERE id = ?", [d.unit_id]);
+  }
+
+  const row = await get(`${AIRBNB_BOOKING_SELECT} WHERE b.id = ?`, [result.lastInsertRowid]);
+  return c.json({ booking: row }, 201);
+});
+
+app.put("/api/airbnb/bookings/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const parsed = await parseJson(c, AirbnbBookingInput.partial());
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+  const existing = await get<{ unit_id: number; booking_status: string }>("SELECT unit_id, booking_status FROM airbnb_bookings WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const { sets, params } = buildUpdate(parsed.data);
+  if (!sets.length) return c.json({ error: "No fields" }, 400);
+  params.push(id);
+  const r = await run(`UPDATE airbnb_bookings SET ${sets.join(", ")} WHERE id = ?`, params);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+
+  if (parsed.data.booking_status) {
+    if (parsed.data.booking_status === "checked_in") {
+      await run("UPDATE units SET status = 'occupied' WHERE id = ?", [existing.unit_id]);
+    } else if (parsed.data.booking_status === "checked_out") {
+      await run("UPDATE units SET status = 'turnover' WHERE id = ?", [existing.unit_id]);
+    }
+  }
+
+  const row = await get(`${AIRBNB_BOOKING_SELECT} WHERE b.id = ?`, [id]);
+  return c.json({ booking: row });
+});
+
+app.delete("/api/airbnb/bookings/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const r = await run("DELETE FROM airbnb_bookings WHERE id = ?", [id]);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+});
+
+// One-click action to schedule a turnover cleaning work order for this checkout
+app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const booking = await get<{
+    id: number; unit_id: number; guest_name: string; check_out_date: string; cleaning_fee: number;
+  }>("SELECT id, unit_id, guest_name, check_out_date, cleaning_fee FROM airbnb_bookings WHERE id = ?", [id]);
+  if (!booking) return c.json({ error: "Booking not found" }, 404);
+
+  const unit = await get<{
+    id: number; property_id: number; name: string; airbnb_cleaning_fee: number; airbnb_lockbox_code: string | null; airbnb_check_out_time: string | null;
+  }>("SELECT id, property_id, name, airbnb_cleaning_fee, airbnb_lockbox_code, airbnb_check_out_time FROM units WHERE id = ?", [booking.unit_id]);
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  // Find a cleaning vendor if available
+  const vendor = await get<{ id: number }>("SELECT id FROM vendors WHERE category = 'cleaning' LIMIT 1");
+
+  const title = `Turnover Cleaning - ${unit.name} (Guest: ${booking.guest_name})`;
+  const cost = booking.cleaning_fee || unit.airbnb_cleaning_fee || 50;
+  const description = `Turnover cleaning and linen change following guest check-out on ${booking.check_out_date} at ${unit.airbnb_check_out_time || '11:00'}. Unit must be prepared for incoming guests.`;
+  const notes = unit.airbnb_lockbox_code ? `Lockbox Code: ${unit.airbnb_lockbox_code}` : null;
+
+  const result = await run(
+    `INSERT INTO work_orders (
+      property_id, unit_id, vendor_id, title, description, priority, status, scheduled_at, cost, notes
+    ) VALUES (?, ?, ?, ?, ?, 'high', ?, ?, ?, ?)`,
+    [
+      unit.property_id,
+      unit.id,
+      vendor?.id ?? null,
+      title,
+      description,
+      vendor ? "assigned" : "open",
+      booking.check_out_date,
+      cost,
+      notes,
+    ],
+  );
+
+  const wo = await get("SELECT * FROM work_orders WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ ok: true, work_order: wo }, 201);
+});
+
+// Comprehensive Airbnb Analytics
+app.get("/api/airbnb/analytics", async (c) => {
+  const propertyId = intParam(c.req.query("property_id"));
+
+  const whereUnit: string[] = ["u.type = 'airbnb'"];
+  const whereBooking: string[] = ["b.booking_status != 'cancelled'"];
+  const paramsUnit: unknown[] = [];
+  const paramsBooking: unknown[] = [];
+
+  if (propertyId) {
+    whereUnit.push("u.property_id = ?");
+    paramsUnit.push(propertyId);
+    whereBooking.push("u.property_id = ?");
+    paramsBooking.push(propertyId);
+  }
+
+  const units = await query<{
+    id: number; name: string; property_id: number; property_name: string;
+    airbnb_nightly_rate: number; airbnb_cleaning_fee: number; status: string;
+  }>(
+    `SELECT u.id, u.name, u.property_id, p.name as property_name,
+            u.airbnb_nightly_rate, u.airbnb_cleaning_fee, u.status
+     FROM units u
+     JOIN properties p ON p.id = u.property_id
+     WHERE ${whereUnit.join(" AND ")}
+     ORDER BY p.name, u.name`,
+    paramsUnit,
+  ).catch(() => []);
+
+  const bookings = await query<{
+    id: number; unit_id: number; guest_name: string; check_in_date: string; check_out_date: string;
+    nights: number; nightly_rate: number; gross_amount: number; net_payout: number;
+    booking_status: string; payout_status: string;
+  }>(
+    `SELECT b.id, b.unit_id, b.guest_name, b.check_in_date, b.check_out_date,
+            b.nights, b.nightly_rate, b.gross_amount, b.net_payout,
+            b.booking_status, b.payout_status
+     FROM airbnb_bookings b
+     JOIN units u ON u.id = b.unit_id
+     WHERE ${whereBooking.join(" AND ")}
+     ORDER BY b.check_in_date DESC`,
+    paramsBooking,
+  ).catch(() => []);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const next7d = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+  let totalRevenue = 0;
+  let totalNights = 0;
+  let activeStays = 0;
+  let upcomingIn7d = 0;
+  let upcomingOut7d = 0;
+
+  for (const b of bookings) {
+    totalRevenue += b.net_payout || 0;
+    totalNights += b.nights || 0;
+    if (b.booking_status === "checked_in" || (b.booking_status === "confirmed" && b.check_in_date <= today && b.check_out_date >= today)) {
+      activeStays++;
+    }
+    if (b.check_in_date >= today && b.check_in_date <= next7d) {
+      upcomingIn7d++;
+    }
+    if (b.check_out_date >= today && b.check_out_date <= next7d) {
+      upcomingOut7d++;
+    }
+  }
+
+  const adr = totalNights > 0 ? Math.round((totalRevenue / totalNights) * 100) / 100 : (units.length > 0 ? units[0].airbnb_nightly_rate : 0);
+
+  // Group by month
+  const monthMap: Record<string, { month: string; revenue: number; nights: number }> = {};
+  for (const b of bookings) {
+    const m = b.check_in_date.slice(0, 7);
+    if (!monthMap[m]) monthMap[m] = { month: m, revenue: 0, nights: 0 };
+    monthMap[m].revenue += b.net_payout || 0;
+    monthMap[m].nights += b.nights || 0;
+  }
+  const revenueByMonth = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
+
+  // Per-unit breakdown
+  const unitsSummary = units.map((u) => {
+    const uBookings = bookings.filter((b) => b.unit_id === u.id);
+    const uRev = uBookings.reduce((sum, b) => sum + (b.net_payout || 0), 0);
+    const uNights = uBookings.reduce((sum, b) => sum + (b.nights || 0), 0);
+    const active = uBookings.find(
+      (b) => b.booking_status === "checked_in" || (b.booking_status === "confirmed" && b.check_in_date <= today && b.check_out_date >= today),
+    );
+    // Rough 30-day occupancy estimate
+    const occPct = Math.min(100, Math.round((uNights / 30) * 100));
+    return {
+      unit_id: u.id,
+      unit_name: u.name,
+      property_id: u.property_id,
+      property_name: u.property_name,
+      bookings_count: uBookings.length,
+      revenue: Math.round(uRev * 100) / 100,
+      occupancy_rate: occPct,
+      current_guest: active ? active.guest_name : null,
+    };
+  });
+
+  const totalPossibleDays = (units.length || 1) * 30;
+  const overallOccupancy = Math.min(100, Math.round((totalNights / totalPossibleDays) * 100));
+
+  return c.json({
+    total_revenue: Math.round(totalRevenue * 100) / 100,
+    total_bookings: bookings.length,
+    active_stays: activeStays,
+    upcoming_check_ins_7d: upcomingIn7d,
+    upcoming_check_outs_7d: upcomingOut7d,
+    average_daily_rate: adr,
+    occupancy_rate: overallOccupancy,
+    revenue_by_month: revenueByMonth,
+    units_summary: unitsSummary,
+  });
 });
 
 // ── Health ─────────────────────────────────────────────────────────
