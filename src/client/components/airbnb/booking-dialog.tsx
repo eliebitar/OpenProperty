@@ -264,7 +264,7 @@ export function BookingDialog({ open, onOpenChange, booking, defaultUnitId, onSa
                     {units.map((u) => (
                       <SelectItem key={u.id} value={String(u.id)}>
                         {u.property_name ? `${u.property_name} · ` : ""}
-                        {u.name} {u.type === "airbnb" ? "✨ (Airbnb)" : `(${u.type})`}
+                        {u.name} {u.type === "airbnb" ? "(Airbnb)" : `(${u.type})`}
                       </SelectItem>
                     ))}
                   </SelectContent>

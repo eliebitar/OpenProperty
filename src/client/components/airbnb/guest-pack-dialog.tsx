@@ -34,26 +34,26 @@ export function GuestPackDialog({ open, onOpenChange, booking, unit }: Props) {
     setTimeout(() => setCopiedSection(null), 2000);
   }
 
-  const fullGuide = `✨ Welcome to ${unitName} at ${propName}!
+  const fullGuide = `Welcome to ${unitName} at ${propName}!
 
-📍 Location & Address:
+--- Location & Address ---
 ${fullAddress || propName}
 
-⏰ Arrival & Departure Times:
+--- Arrival & Departure Times ---
 • Check-in: from ${checkInTime}
 • Check-out: by ${checkOutTime}
 
-🔑 Key & Access:
+--- Key & Access ---
 • Digital Lockbox Code: ${lockboxCode}
 
-📶 High-Speed Wi-Fi:
+--- High-Speed Wi-Fi ---
 • Network: ${wifiSsid}
 • Password: ${wifiPass}
 
-📋 House Rules:
+--- House Rules ---
 ${houseRules}
 
-🚪 Check-out Instructions:
+--- Check-out Instructions ---
 ${checkOutInstructions}
 
 Have a wonderful stay! Please let us know if you need anything.`;

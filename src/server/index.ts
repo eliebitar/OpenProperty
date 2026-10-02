@@ -4123,7 +4123,7 @@ app.put("/api/cleaning-tasks/:id", async (c) => {
       for (const m of managers) {
         sendEmail(emailCfg, {
           to: m.email,
-          subject: `✨ Unit Ready: ${unit?.name || 'Unit'} has been cleaned!`,
+          subject: `Unit Ready: ${unit?.name || 'Unit'} has been cleaned!`,
           html,
           text: `${unit?.name} (${prop?.name}) was cleaned by ${cleaner?.name || 'cleaner'} and is ready for guests.`,
         }).catch(() => {});

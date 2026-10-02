@@ -25,6 +25,8 @@ import {
   CheckCircle,
   Send,
   Camera,
+  LogOut,
+  Luggage,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
@@ -47,13 +49,13 @@ import { PhotoGalleryModal } from "./photo-gallery-modal";
 import type { ChecklistItem, CleaningTask, InspectionPhoto } from "@/types";
 
 const ISSUE_PRESETS = [
-  "🧻 Toilet paper / soap / shampoo empty",
-  "🧺 Need fresh towels or bed linens restocked",
-  "☕ Coffee pods, tea, or sugar depleted",
-  "🔨 Damaged item or maintenance issue found",
-  "🧳 Leftover belongings from previous guest",
-  "🔑 Lockbox issue or key was missing",
-  "⏰ Unit excessively dirty - need more time",
+  "Toilet paper, soap, or shampoo depleted",
+  "Need fresh towels or bed linens restocked",
+  "Coffee pods, tea bags, or sugar empty",
+  "Damaged item or maintenance issue discovered",
+  "Leftover belongings from previous guest",
+  "Lockbox issue or physical key missing",
+  "Unit excessively dirty - extra time required",
 ];
 
 const DEFAULT_CHECKLIST_ITEMS: ChecklistItem[] = [
@@ -204,7 +206,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
     try {
       const updated = await app.updateCleaningTask(task.id, { status: "completed" });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-      showToast(`✨ ${task.unit_name} is Cleaned & Ready! Property manager has been notified.`);
+      showToast(`${task.unit_name} is Cleaned & Ready! Property manager has been notified.`);
     } catch (err) {
       app.setError((err as Error).message);
     }
@@ -219,7 +221,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
         notes: notes || inspectionTask.notes || undefined,
       });
       setTasks((prev) => prev.map((t) => (t.id === inspectionTask.id ? updated : t)));
-      showToast(`✨ ${inspectionTask.unit_name} is Cleaned & Ready! Proof photos submitted to manager.`);
+      showToast(`${inspectionTask.unit_name} is Cleaned & Ready! Proof photos submitted to manager.`);
     } catch (err) {
       app.setError((err as Error).message);
     }
@@ -352,8 +354,10 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
       <div className="rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/15 via-sky-500/10 to-indigo-500/10 p-4 sm:p-5 shadow-xs space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">🧹</span>
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-9 items-center justify-center rounded-xl bg-teal-500/20 text-teal-700 dark:text-teal-300">
+                <Sparkles className="size-5" />
+              </div>
               <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-foreground">
                 Welcome back!
               </h2>
@@ -395,37 +399,40 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
         <button
           type="button"
           onClick={() => setFilter("today_upcoming")}
-          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
             filter === "today_upcoming"
               ? "bg-teal-600 text-white shadow-xs"
               : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
-          ⏰ Today & Upcoming ({tasks.filter((t) => t.status !== "completed" || t.scheduled_date >= todayStr).length})
+          <Clock className="size-3.5" />
+          <span>Today & Upcoming ({tasks.filter((t) => t.status !== "completed" || t.scheduled_date >= todayStr).length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setFilter("in_progress")}
-          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
             filter === "in_progress"
               ? "bg-amber-600 text-white shadow-xs"
               : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
-          🧹 Cleaning ({stats.inProgressCount})
+          <Sparkles className="size-3.5" />
+          <span>In Progress ({stats.inProgressCount})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setFilter("completed")}
-          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+          className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
             filter === "completed"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
-          ✅ Finished ({tasks.filter((t) => t.status === "completed").length})
+          <CheckCircle2 className="size-3.5" />
+          <span>Finished ({tasks.filter((t) => t.status === "completed").length})</span>
         </button>
 
         <button
@@ -509,18 +516,21 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                       {/* Status Badges */}
                       <div className="flex flex-col items-end gap-1.5">
                         {isInProgress && (
-                          <Badge className="bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/40 font-bold text-xs py-1 px-2.5 animate-pulse">
-                            🧹 Cleaning In Progress
+                          <Badge className="bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/40 font-bold text-xs py-1 px-2.5 animate-pulse inline-flex items-center gap-1.5">
+                            <Sparkles className="size-3.5" />
+                            <span>Cleaning In Progress</span>
                           </Badge>
                         )}
                         {isCompleted && (
-                          <Badge className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/40 font-bold text-xs py-1 px-2.5">
-                            ✅ Cleaned & Ready
+                          <Badge className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/40 font-bold text-xs py-1 px-2.5 inline-flex items-center gap-1.5">
+                            <CheckCircle2 className="size-3.5" />
+                            <span>Cleaned & Ready</span>
                           </Badge>
                         )}
                         {!isInProgress && !isCompleted && (
-                          <Badge className="bg-teal-500/20 text-teal-800 dark:text-teal-200 border-teal-500/40 font-bold text-xs py-1 px-2.5">
-                            📅 Scheduled
+                          <Badge className="bg-teal-500/20 text-teal-800 dark:text-teal-200 border-teal-500/40 font-bold text-xs py-1 px-2.5 inline-flex items-center gap-1.5">
+                            <Calendar className="size-3.5" />
+                            <span>Scheduled</span>
                           </Badge>
                         )}
 
@@ -604,8 +614,9 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                   {/* Turnover Timing Timeline */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-muted/30 border border-border/80 text-xs">
                     <div className="space-y-0.5">
-                      <span className="text-[11px] text-muted-foreground font-medium block">
-                        🚪 Guest Departed:
+                      <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
+                        <LogOut className="size-3 text-muted-foreground" />
+                        <span>Guest Departed:</span>
                       </span>
                       <span className="font-bold text-foreground text-xs sm:text-sm block">
                         {formatDate(task.scheduled_date)} at {task.scheduled_time || "11:00"}
@@ -613,8 +624,9 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                     </div>
 
                     <div className="space-y-0.5">
-                      <span className="text-[11px] text-muted-foreground font-medium block">
-                        🧳 Next Guest Check-in:
+                      <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
+                        <Luggage className="size-3 text-muted-foreground" />
+                        <span>Next Guest Check-in:</span>
                       </span>
                       <span className="font-bold text-foreground text-xs sm:text-sm block">
                         {task.next_check_in_date ? (
@@ -771,7 +783,7 @@ export function CleanerPage({ navigate }: { navigate?: (to: string) => void }) {
                           className="w-full h-13 sm:h-14 rounded-xl text-base sm:text-lg font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg gap-2 cursor-pointer active:scale-[0.99] transition-transform"
                         >
                           <Camera className="size-5 text-white" />
-                          <span>📸 Photo Walkthrough & Mark Cleaned</span>
+                          <span>Photo Walkthrough & Mark Cleaned</span>
                         </Button>
 
                         {photos.length > 0 && (

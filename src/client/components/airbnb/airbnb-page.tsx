@@ -785,7 +785,7 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
                 This will delete the 3 sample properties (Oakwood Estate, Honeybee Hideaway, 308 Mission Apartments), the sample Suite 4B Airbnb Loft, and sample bookings.
               </p>
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-emerald-900 dark:text-emerald-200">
-                ✓ <strong>Your real data is completely safe:</strong> Your real properties (such as <em>Mauerstraße 15</em>), your real Airbnb units, and all real reservations will remain untouched.
+                &#x2022; <strong>Your real data is completely safe:</strong> Your real properties (such as <em>Mauerstraße 15</em>), your real Airbnb units, and all real reservations will remain untouched.
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -498,7 +498,7 @@ export function EmailSettingsTab() {
 
               {smtpHost.includes("gmail.com") && (
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  💡 <strong>Gmail Tip:</strong> Use your full Gmail address and a 16-character <em>Google App Password</em> (generated in Google Account &rarr; Security &rarr; 2-Step Verification &rarr; App Passwords), NOT your normal account password.
+                  <strong>Gmail Tip:</strong> Use your full Gmail address and a 16-character <em>Google App Password</em> (generated in Google Account &rarr; Security &rarr; 2-Step Verification &rarr; App Passwords), NOT your normal account password.
                 </p>
               )}
             </div>

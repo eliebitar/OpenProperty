@@ -213,7 +213,7 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                 This will delete the <strong>{demoStatus?.counts.properties || 3} sample properties</strong> ({demoStatus?.demoProperties.join(", ")}), their demo units, and sample Airbnb bookings.
               </p>
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-emerald-900 dark:text-emerald-200">
-                ✓ <strong>Your real properties are completely safe:</strong> Your real properties, units, tenants, and active leases will remain untouched.
+                &#x2022; <strong>Your real properties are completely safe:</strong> Your real properties, units, tenants, and active leases will remain untouched.
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

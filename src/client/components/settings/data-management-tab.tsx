@@ -209,7 +209,7 @@ export function DataManagementTab() {
                 This will permanently delete the <strong>3 demo properties</strong> (Oakwood Estate, Honeybee Hideaway, 308 Mission Apartments), their <strong>6 demo units</strong> (including Suite 4B Designer Loft), and sample Airbnb reservations.
               </p>
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-emerald-900 dark:text-emerald-200">
-                ✓ <strong>Your real data is completely safe:</strong> Any custom properties (e.g. <em>Mauerstraße 15</em>), your real units, real tenants, and leases will remain intact.
+                &#x2022; <strong>Your real data is completely safe:</strong> Any custom properties (e.g. <em>Mauerstraße 15</em>), your real units, real tenants, and leases will remain intact.
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

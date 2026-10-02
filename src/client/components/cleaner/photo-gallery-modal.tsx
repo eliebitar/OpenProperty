@@ -11,6 +11,11 @@ import {
   Maximize2,
   Clock,
   Download,
+  BedDouble,
+  Bath,
+  UtensilsCrossed,
+  Sofa,
+  KeyRound,
 } from "lucide-react";
 import {
   Dialog,
@@ -24,6 +29,23 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { parseInspectionPhotos, INSPECTION_ZONES } from "@/lib/photo-utils";
 import type { CleaningTask, InspectionPhoto } from "@/types";
+
+function renderZoneIcon(zoneId: string, className = "size-3.5") {
+  switch (zoneId) {
+    case "bedroom":
+      return <BedDouble className={className} />;
+    case "bathroom":
+      return <Bath className={className} />;
+    case "kitchen":
+      return <UtensilsCrossed className={className} />;
+    case "living_room":
+      return <Sofa className={className} />;
+    case "lockbox":
+      return <KeyRound className={className} />;
+    default:
+      return <Camera className={className} />;
+  }
+}
 
 interface Props {
   open: boolean;
@@ -113,7 +135,7 @@ export function PhotoGalleryModal({ open, onOpenChange, task }: Props) {
               <div className="min-w-0">
                 <span className="text-[10px] text-muted-foreground block">Status</span>
                 <span className="font-bold text-emerald-600 dark:text-emerald-400 block">
-                  {task.status === "completed" ? "✓ Verified Cleaned" : "In Progress"}
+                  {task.status === "completed" ? "Verified Cleaned" : "In Progress"}
                 </span>
               </div>
             </div>
@@ -147,8 +169,8 @@ export function PhotoGalleryModal({ open, onOpenChange, task }: Props) {
                         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
                           <Maximize2 className="size-6 drop-shadow-md" />
                         </div>
-                        <div className="absolute top-2 left-2 bg-black/60 text-white font-bold text-[10px] px-2 py-0.5 rounded-md backdrop-blur-xs flex items-center gap-1">
-                          <span>{zoneConfig?.icon || "📸"}</span>
+                        <div className="absolute top-2 left-2 bg-black/60 text-white font-bold text-[10px] px-2 py-0.5 rounded-md backdrop-blur-xs flex items-center gap-1.5">
+                          {renderZoneIcon(photo.zone, "size-3 text-teal-400")}
                           <span>{photo.zoneLabel}</span>
                         </div>
                         <div className="absolute bottom-2 right-2 bg-black/60 text-white font-mono text-[9px] px-1.5 py-0.5 rounded backdrop-blur-xs">
@@ -187,10 +209,10 @@ export function PhotoGalleryModal({ open, onOpenChange, task }: Props) {
           <DialogContent className="max-w-4xl w-[96vw] max-h-[95vh] p-0 overflow-hidden bg-black border-zinc-800 text-white rounded-2xl flex flex-col">
             {/* Lightbox header */}
             <div className="flex items-center justify-between p-4 bg-zinc-950/80 border-b border-zinc-800 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">
-                  {INSPECTION_ZONES.find((z) => z.id === activePhoto.zone)?.icon || "📸"}
-                </span>
+              <div className="flex items-center gap-2.5">
+                <div className="flex size-8 items-center justify-center rounded-lg bg-white/10 text-teal-400">
+                  {renderZoneIcon(activePhoto.zone, "size-4")}
+                </div>
                 <div>
                   <h4 className="font-bold text-sm text-zinc-100">
                     {activePhoto.zoneLabel}

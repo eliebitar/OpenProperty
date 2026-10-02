@@ -4,7 +4,7 @@ export interface ZoneConfig {
   id: InspectionZone;
   label: string;
   shortLabel: string;
-  icon: string;
+  iconName: "bed" | "bath" | "kitchen" | "living" | "lockbox";
   description: string;
   required: boolean;
   tips: string;
@@ -15,7 +15,7 @@ export const INSPECTION_ZONES: ZoneConfig[] = [
     id: "bedroom",
     label: "Bedrooms & Fresh Linens",
     shortLabel: "Bedrooms",
-    icon: "🛏️",
+    iconName: "bed",
     description: "Beds neatly made with fresh sheets, duvet & fluffed pillows",
     required: true,
     tips: "Capture a clear wide angle showing the fully made bed.",
@@ -24,7 +24,7 @@ export const INSPECTION_ZONES: ZoneConfig[] = [
     id: "bathroom",
     label: "Bathroom & Shower",
     shortLabel: "Bathroom",
-    icon: "🚿",
+    iconName: "bath",
     description: "Sanitized sink, toilet, shower/tub & clean folded towels",
     required: true,
     tips: "Show clean mirrors, sanitized toilet, and stocked toiletries.",
@@ -33,7 +33,7 @@ export const INSPECTION_ZONES: ZoneConfig[] = [
     id: "kitchen",
     label: "Kitchen & Dining",
     shortLabel: "Kitchen",
-    icon: "🍳",
+    iconName: "kitchen",
     description: "Wiped counters, clean sink, and empty microwave/fridge",
     required: false,
     tips: "Show clean stovetop, dry sink, and cleared trash.",
@@ -42,7 +42,7 @@ export const INSPECTION_ZONES: ZoneConfig[] = [
     id: "living_room",
     label: "Living Room / Main Area",
     shortLabel: "Living Area",
-    icon: "🛋️",
+    iconName: "living",
     description: "Tidy furniture, vacuumed/mopped floors & welcoming setup",
     required: false,
     tips: "Capture the overall room feeling staged and ready for guests.",
@@ -51,7 +51,7 @@ export const INSPECTION_ZONES: ZoneConfig[] = [
     id: "lockbox",
     label: "Lockbox / Door Locked",
     shortLabel: "Lockbox",
-    icon: "🔑",
+    iconName: "lockbox",
     description: "Key safely returned inside lockbox & exterior door secured",
     required: false,
     tips: "Confirm keys are locked inside and lockbox closed.",
@@ -93,7 +93,6 @@ export async function compressImage(file: File, maxDimension = 1200, quality = 0
           return;
         }
 
-        // Draw image smoothly
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
@@ -105,6 +104,36 @@ export async function compressImage(file: File, maxDimension = 1200, quality = 0
     };
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * Compress an HTML5 canvas directly to JPEG data URL.
+ */
+export function compressCanvas(canvas: HTMLCanvasElement, maxDimension = 1200, quality = 0.75): string {
+  let width = canvas.width;
+  let height = canvas.height;
+
+  if (width > maxDimension || height > maxDimension) {
+    if (width > height) {
+      height = Math.round((height * maxDimension) / width);
+      width = maxDimension;
+    } else {
+      width = Math.round((width * maxDimension) / height);
+      height = maxDimension;
+    }
+    const scaled = document.createElement("canvas");
+    scaled.width = width;
+    scaled.height = height;
+    const ctx = scaled.getContext("2d");
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(canvas, 0, 0, width, height);
+      return scaled.toDataURL("image/jpeg", quality);
+    }
+  }
+
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 /**

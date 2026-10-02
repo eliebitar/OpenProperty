@@ -17,6 +17,7 @@ import {
   ExternalLink,
   ShieldAlert,
   Camera,
+  KeyRound,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -517,24 +518,28 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
                         </span>
 
                         {task.status === "in_progress" && (
-                          <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 text-xs font-semibold animate-pulse">
-                            🧹 In Progress
+                          <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 text-xs font-semibold animate-pulse inline-flex items-center gap-1.5">
+                            <Sparkles className="size-3 shrink-0" />
+                            <span>In Progress</span>
                           </Badge>
                         )}
                         {task.status === "completed" && (
-                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-xs font-semibold">
-                            ✅ Cleaned & Ready
+                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-xs font-semibold inline-flex items-center gap-1.5">
+                            <CheckCircle2 className="size-3 shrink-0" />
+                            <span>Cleaned & Ready</span>
                           </Badge>
                         )}
                         {task.status === "scheduled" && (
-                          <Badge className="bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30 text-xs font-semibold">
-                            📅 Scheduled
+                          <Badge className="bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30 text-xs font-semibold inline-flex items-center gap-1.5">
+                            <Calendar className="size-3 shrink-0" />
+                            <span>Scheduled</span>
                           </Badge>
                         )}
 
                         {task.airbnb_lockbox_code && (
-                          <Badge variant="outline" className="text-[11px] font-mono border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
-                            🔑 Code: {task.airbnb_lockbox_code}
+                          <Badge variant="outline" className="text-[11px] font-mono border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 inline-flex items-center gap-1">
+                            <KeyRound className="size-3 shrink-0" />
+                            <span>Code: {task.airbnb_lockbox_code}</span>
                           </Badge>
                         )}
                       </div>

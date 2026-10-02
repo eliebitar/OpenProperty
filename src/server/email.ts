@@ -766,7 +766,7 @@ export function renderInviteEmailHtml(params: InviteEmailParams): string {
               <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="background-color: #f0fdf4; border-radius: 10px; width: 36px; height: 36px; text-align: center; vertical-align: middle; border: 1px solid #bbf7d0;">
-                    <span style="font-size: 20px;">🏢</span>
+                    <span style="font-size: 20px; font-weight: 700; color: #059669;">OP</span>
                   </td>
                   <td style="padding-left: 12px;">
                     <span style="font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">OpenProperty</span>
@@ -873,7 +873,7 @@ export function renderTestEmailHtml(provider: string, fromAddress: string): stri
 <head><meta charset="utf-8"><title>OpenProperty Email Test</title></head>
 <body style="font-family: -apple-system, sans-serif; background: #f8fafc; padding: 40px; color: #0f172a;">
   <div style="max-width: 520px; margin: auto; background: #ffffff; padding: 32px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 2px 10px rgba(0,0,0,0.04);">
-    <h2 style="margin: 0 0 12px 0; color: #0284c7;">🎉 Email Sender Test Succeeded!</h2>
+    <h2 style="margin: 0 0 12px 0; color: #0284c7;">Email Sender Test Succeeded!</h2>
     <p style="font-size: 14px; line-height: 1.6; color: #475569;">
       Your OpenProperty email configuration is working properly.
     </p>
@@ -938,7 +938,7 @@ export function renderCleaningAssignmentEmailHtml(params: CleaningEmailParams): 
               <table role="presentation" border="0" cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="background-color: #f0fdfa; border-radius: 10px; width: 36px; height: 36px; text-align: center; vertical-align: middle; border: 1px solid #99f6e4;">
-                    <span style="font-size: 20px;">🧹</span>
+                    <span style="font-size: 16px; font-weight: 700; color: #0d9488;">&#10003;</span>
                   </td>
                   <td style="padding-left: 12px;">
                     <span style="font-size: 17px; font-weight: 700; color: #0f172a;">${escapeHtml(params.organizationName)}</span>
@@ -972,7 +972,7 @@ export function renderCleaningAssignmentEmailHtml(params: CleaningEmailParams): 
                       Address
                     </p>
                     <p style="margin: 0 0 14px 0; font-size: 14px; color: #334155;">
-                      📍 ${escapeHtml(params.propertyAddress)}
+                      ${escapeHtml(params.propertyAddress)}
                     </p>
                     ` : ""}
 
@@ -980,7 +980,7 @@ export function renderCleaningAssignmentEmailHtml(params: CleaningEmailParams): 
                       Date & Turnover Window
                     </p>
                     <p style="margin: 0 0 14px 0; font-size: 15px; color: #0d9488; font-weight: 600;">
-                      📅 ${escapeHtml(params.scheduledDate)} at ${escapeHtml(params.scheduledTime)}
+                      ${escapeHtml(params.scheduledDate)} at ${escapeHtml(params.scheduledTime)}
                     </p>
                     <p style="margin: 0 0 14px 0; font-size: 13px; color: #64748b; line-height: 1.4;">
                       ${windowText}
@@ -988,7 +988,7 @@ export function renderCleaningAssignmentEmailHtml(params: CleaningEmailParams): 
 
                     ${params.lockboxCode ? `
                     <div style="background-color: #ecfdf5; border: 1px dashed #10b981; border-radius: 8px; padding: 12px 16px; margin-top: 8px;">
-                      <span style="font-size: 12px; color: #047857; font-weight: 600; text-transform: uppercase;">🔑 Key Access / Lockbox Code:</span>
+                      <span style="font-size: 12px; color: #047857; font-weight: 600; text-transform: uppercase;">Key Access / Lockbox Code:</span>
                       <div style="font-size: 20px; font-weight: 800; color: #065f46; letter-spacing: 0.1em; margin-top: 4px;">
                         ${escapeHtml(params.lockboxCode)}
                       </div>
@@ -1079,9 +1079,9 @@ export function renderCleaningReminderEmailHtml(params: CleaningEmailParams): st
                 <tr>
                   <td style="padding: 20px;">
                     <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 700; color: #92400e;">
-                      🏢 ${escapeHtml(params.unitName)} (${escapeHtml(params.propertyName)})
+                      ${escapeHtml(params.unitName)} (${escapeHtml(params.propertyName)})
                     </p>
-                    ${params.propertyAddress ? `<p style="margin: 0 0 10px 0; font-size: 13px; color: #b45309;">📍 ${escapeHtml(params.propertyAddress)}</p>` : ""}
+                    ${params.propertyAddress ? `<p style="margin: 0 0 10px 0; font-size: 13px; color: #b45309;">${escapeHtml(params.propertyAddress)}</p>` : ""}
 
                     ${params.lockboxCode ? `
                     <div style="background-color: #ffffff; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-top: 10px;">
@@ -1139,7 +1139,7 @@ export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailP
 <body style="font-family: -apple-system, sans-serif; background: #f8fafc; padding: 32px; color: #0f172a;">
   <div style="max-width: 540px; margin: auto; background: #ffffff; padding: 32px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 2px 10px rgba(0,0,0,0.04);">
     <div style="display: inline-block; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px; margin-bottom: 12px;">
-      ✓ READY FOR GUESTS
+      READY FOR GUESTS
     </div>
     <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 20px;">
       ${escapeHtml(params.unitName)} is Clean & Prepared!
@@ -1157,7 +1157,7 @@ export function renderCleaningCompletedEmailHtml(params: CleaningCompletedEmailP
 
     ${params.issueReported ? `
     <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 14px; font-size: 13px; margin-bottom: 20px; color: #9f1239;">
-      <strong>⚠️ Issue Reported by Cleaner:</strong>
+      <strong>Issue Reported by Cleaner:</strong>
       <p style="margin: 4px 0 0 0;">${escapeHtml(params.issueReported)}</p>
     </div>
     ` : ""}
