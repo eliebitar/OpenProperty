@@ -33,16 +33,16 @@ export function PageShell({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-6">
-        <h1 className="shrink-0 truncate text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-3.5 sm:px-6">
+        <h1 className="shrink-0 truncate text-[1.25rem] sm:text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">
           {title}
         </h1>
         {meta ? (
-          <div className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{meta}</div>
+          <div className="min-w-0 flex-1 truncate text-xs sm:text-sm text-muted-foreground">{meta}</div>
         ) : (
           <div className="flex-1" />
         )}
-        <div className="flex shrink-0 items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-2">
           <OrganizationSwitcher
             onNavigateOrganization={isCleaner ? undefined : () => {
               window.history.pushState(null, "", "/organization");
@@ -53,7 +53,7 @@ export function PageShell({
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className={cn("mx-auto w-full space-y-6 p-6", width)}>{children}</div>
+        <div className={cn("mx-auto w-full space-y-4 sm:space-y-6 p-3.5 sm:p-6", width)}>{children}</div>
       </div>
     </div>
   );
