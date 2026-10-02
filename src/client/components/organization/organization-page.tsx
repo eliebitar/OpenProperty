@@ -20,6 +20,8 @@ import {
   Search,
   RefreshCw,
   Plus,
+  Send,
+  AlertCircle,
 } from "lucide-react";
 import { useApp } from "@/context";
 import { useAuth } from "@/auth";
@@ -84,6 +86,13 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
   const [isInviting, setIsInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  // Email invite feedback & resend state
+  const [inviteFeedback, setInviteFeedback] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+  const [resendingMemberId, setResendingMemberId] = useState<number | null>(null);
+
   // Edit org form state
   const [orgName, setOrgName] = useState(activeOrg?.name || "");
   const [orgDesc, setOrgDesc] = useState(activeOrg?.description || "");
@@ -131,12 +140,33 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
     try {
       setIsInviting(true);
       setInviteError(null);
-      await app.inviteOrganizationMember({
+      const res = await app.inviteOrganizationMember({
         email: inviteEmail.trim(),
         name: inviteName.trim(),
         role: inviteRole,
-        status: "active",
+        status: "invited",
       });
+
+      const emailRes = res?.email_result;
+      if (emailRes?.ok) {
+        if (emailRes.simulated) {
+          setInviteFeedback({
+            type: "warning",
+            message: `Member ${inviteName.trim()} invited! Outbound email was logged in simulation mode (enable Email Sender in Settings to deliver live emails).`,
+          });
+        } else {
+          setInviteFeedback({
+            type: "success",
+            message: `Invitation email sent to ${inviteEmail.trim()}! An invitation link has been delivered.`,
+          });
+        }
+      } else {
+        setInviteFeedback({
+          type: "warning",
+          message: `Member added to organization, but email delivery failed: ${emailRes?.error || "Unknown error"}. You can re-send it from the member list.`,
+        });
+      }
+
       setInviteEmail("");
       setInviteName("");
       setInviteRole("manager");
@@ -145,6 +175,39 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
       setInviteError((err as Error).message || "Failed to add member");
     } finally {
       setIsInviting(false);
+    }
+  };
+
+  const handleResendInvite = async (member: OrganizationMember) => {
+    try {
+      setResendingMemberId(member.id);
+      const res = await app.resendOrganizationInvite(member.id);
+      const emailRes = res?.email_result;
+      if (emailRes?.ok) {
+        if (emailRes.simulated) {
+          setInviteFeedback({
+            type: "warning",
+            message: `Invitation email simulated for ${member.email} (Email Sender is currently disabled).`,
+          });
+        } else {
+          setInviteFeedback({
+            type: "success",
+            message: `Invitation email successfully resent to ${member.email}!`,
+          });
+        }
+      } else {
+        setInviteFeedback({
+          type: "error",
+          message: `Failed to resend email: ${emailRes?.error || "Unknown error"}`,
+        });
+      }
+    } catch (err) {
+      setInviteFeedback({
+        type: "error",
+        message: (err as Error).message || "Failed to resend invitation email",
+      });
+    } finally {
+      setResendingMemberId(null);
     }
   };
 
@@ -508,6 +571,36 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
         </Card>
       )}
 
+      {/* Invite & Delivery Feedback Banner */}
+      {inviteFeedback && (
+        <div
+          className={`flex items-start justify-between gap-3 p-3.5 rounded-lg border text-xs transition-all ${
+            inviteFeedback.type === "success"
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300"
+              : inviteFeedback.type === "warning"
+              ? "bg-amber-500/10 border-amber-500/20 text-amber-800 dark:text-amber-300"
+              : "bg-destructive/10 border-destructive/20 text-destructive"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {inviteFeedback.type === "success" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            )}
+            <p className="font-medium">{inviteFeedback.message}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => setInviteFeedback(null)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Team Members List */}
       <Card className="overflow-hidden border-border/70 shadow-xs">
         <div className="flex flex-col gap-4 border-b border-border/70 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -606,13 +699,28 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                       <td className="px-3 py-3">{getRoleBadge(m.role)}</td>
 
                       <td className="px-3 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`h-2 w-2 rounded-full ${
-                              m.status === "active" ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
-                            }`}
-                          />
-                          <span className="capitalize text-muted-foreground">{m.status}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                m.status === "active" ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
+                              }`}
+                            />
+                            <span className="capitalize text-muted-foreground">{m.status}</span>
+                          </div>
+                          {m.status === "invited" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10"
+                              disabled={resendingMemberId === m.id}
+                              onClick={() => handleResendInvite(m)}
+                              title="Resend invitation email to this user"
+                            >
+                              <Send className={`h-3 w-3 ${resendingMemberId === m.id ? "animate-spin" : ""}`} />
+                              <span>{resendingMemberId === m.id ? "Sending..." : "Resend"}</span>
+                            </Button>
+                          )}
                         </div>
                       </td>
 
@@ -640,6 +748,15 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                             >
                               <Pencil className="mr-2 h-3.5 w-3.5" />
                               <span>Change Role</span>
+                            </DropdownMenuItem>
+
+                            <DropdownMenuItem
+                              onClick={() => handleResendInvite(m)}
+                              disabled={resendingMemberId === m.id}
+                              className="cursor-pointer"
+                            >
+                              <Send className="mr-2 h-3.5 w-3.5 text-primary" />
+                              <span>Resend Invitation Email</span>
                             </DropdownMenuItem>
 
                             <DropdownMenuItem
@@ -788,6 +905,27 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
               </Select>
             </div>
 
+            <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs space-y-1.5">
+              <div className="flex items-center gap-1.5 font-medium text-primary">
+                <Mail className="h-3.5 w-3.5" />
+                <span>Automated Invitation Email</span>
+              </div>
+              <p className="text-muted-foreground leading-relaxed">
+                An invitation email will be dispatched to this address with instructions to join <strong>{activeOrg?.name}</strong>.
+                You can configure your SMTP host or API key (Resend, SendGrid, Brevo, Postmark) in{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteDialogOpen(false);
+                    navigate("/settings");
+                  }}
+                  className="text-primary underline font-medium hover:text-primary/80"
+                >
+                  Admin Settings &rarr; Email Sender
+                </button>.
+              </p>
+            </div>
+
             <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
               <p className="font-medium text-foreground">Multi-User Shared Access</p>
               <p className="mt-0.5">
@@ -806,7 +944,7 @@ export function OrganizationPage({ navigate }: { navigate: (path: string) => voi
                 Cancel
               </Button>
               <Button type="submit" disabled={isInviting || !inviteEmail.trim() || !inviteName.trim()}>
-                {isInviting ? "Adding Member…" : "Add Member"}
+                {isInviting ? "Sending Invite…" : "Send Invite"}
               </Button>
             </DialogFooter>
           </form>

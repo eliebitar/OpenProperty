@@ -24,6 +24,7 @@ import { PageShell } from "@/components/page-shell";
 import { AuthSettingsTab } from "./auth-settings-tab";
 import { DataManagementTab } from "./data-management-tab";
 import { OrganizationTab } from "./organization-tab";
+import { EmailSettingsTab } from "./email-settings-tab";
 
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];
 
@@ -41,13 +42,14 @@ export function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      meta="Organization & team members, vendors, rent policy defaults, Keycloak authentication, and sample data"
+      meta="Organization & team members, email sender, vendors, rent policy defaults, Keycloak authentication, and sample data"
       width="max-w-5xl"
     >
 
         <Tabs defaultValue="organization">
           <TabsList>
             <TabsTrigger value="organization">Organization & Team</TabsTrigger>
+            <TabsTrigger value="email">Email Sender</TabsTrigger>
             <TabsTrigger value="vendors">Vendors</TabsTrigger>
             <TabsTrigger value="policy">Rent policy</TabsTrigger>
             <TabsTrigger value="auth">Authentication</TabsTrigger>
@@ -56,6 +58,9 @@ export function SettingsPage() {
 
           <TabsContent value="organization" className="mt-4">
             <OrganizationTab />
+          </TabsContent>
+          <TabsContent value="email" className="mt-4">
+            <EmailSettingsTab />
           </TabsContent>
           <TabsContent value="vendors" className="mt-4">
             <VendorsTab />

@@ -456,3 +456,32 @@ export interface InviteMemberInput {
   status?: MemberStatus;
 }
 
+// ── Email & Sender Configuration ──────────────────────────────────
+
+export type EmailProvider = "smtp" | "resend" | "sendgrid" | "brevo" | "postmark" | "mailchannels";
+
+export interface EmailSenderConfig {
+  enabled: boolean;
+  provider: EmailProvider;
+  fromAddress: string;
+  fromName: string;
+  replyTo?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPass?: string;
+  apiKey?: string;
+}
+
+export interface EmailLogEntry {
+  id: number;
+  to_email: string;
+  subject: string;
+  provider: string;
+  status: "sent" | "failed" | "simulated";
+  error: string | null;
+  created_at: string;
+}
+
+

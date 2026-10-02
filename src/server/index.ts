@@ -2,6 +2,15 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { initDB, query, get, run } from "./db";
 import { authMiddleware, getKeycloakConfig, type ServerEnv } from "./auth";
+import {
+  getEmailConfig,
+  sendEmail,
+  renderInviteEmailHtml,
+  renderTestEmailHtml,
+  type EmailConfig,
+  type EmailProvider,
+  type SendEmailResult,
+} from "./email";
 
 type Env = ServerEnv;
 
@@ -31,6 +40,17 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   keycloak_realm: "openproperty",
   keycloak_client_id: "openproperty-client",
   keycloak_required: "false",
+  email_enabled: "false",
+  email_provider: "smtp",
+  email_from_address: "noreply@openproperty.local",
+  email_from_name: "OpenProperty",
+  email_reply_to: "",
+  email_smtp_host: "smtp.gmail.com",
+  email_smtp_port: "465",
+  email_smtp_secure: "true",
+  email_smtp_user: "",
+  email_smtp_pass: "",
+  email_api_key: "",
 };
 
 const DEMO_PROPERTIES: Array<[string, string, string, string, string, string, string]> = [
@@ -148,6 +168,19 @@ async function ensureSeeded(): Promise<void> {
 
     await run("CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id)");
     await run("CREATE INDEX IF NOT EXISTS idx_org_members_email ON organization_members(email)");
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS email_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        to_email TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    await run("CREATE INDEX IF NOT EXISTS idx_email_logs_created ON email_logs(created_at DESC)");
 
     // Add organization_id to properties table
     try {
@@ -763,7 +796,90 @@ app.post("/api/organizations/:id/members", async (c) => {
   );
 
   const member = await get("SELECT * FROM organization_members WHERE id = ?", [result.lastInsertRowid]);
-  return c.json({ member }, 201);
+
+  // Dispatch Invitation Email
+  let emailResult: SendEmailResult = { ok: true, simulated: true };
+  try {
+    const emailCfg = await getEmailConfig(c);
+    const org = await get<{ name: string }>("SELECT name FROM organizations WHERE id = ?", [orgId]);
+    const currentUser = getCurrentUser(c);
+    const appOrigin = c.req.header("Origin") || c.req.header("Referer")?.replace(/\/[^/]*$/, "") || "http://localhost:5173";
+
+    const inviteHtml = renderInviteEmailHtml({
+      inviteeName: d.name.trim(),
+      inviteeEmail: d.email.trim(),
+      organizationName: org?.name || "Organization",
+      role: d.role || "manager",
+      inviterName: currentUser.name || undefined,
+      inviterEmail: currentUser.email || undefined,
+      appUrl: `${appOrigin}/organization`,
+    });
+
+    emailResult = await sendEmail(
+      emailCfg,
+      {
+        to: d.email.trim(),
+        subject: `Invitation to join ${org?.name || "OpenProperty"}`,
+        html: inviteHtml,
+      },
+      c
+    );
+  } catch (mailErr) {
+    emailResult = { ok: false, error: (mailErr as Error).message };
+  }
+
+  return c.json({ member, email_result: emailResult }, 201);
+});
+
+app.post("/api/organizations/:id/members/:memberId/resend-invite", async (c) => {
+  const orgId = intParam(c.req.param("id"));
+  const memberId = intParam(c.req.param("memberId"));
+  if (!orgId || !memberId) return c.json({ error: "Invalid ID" }, 400);
+
+  const currentRole = await getUserOrgRole(c, orgId);
+  if (currentRole !== "owner" && currentRole !== "admin") {
+    return c.json({ error: "Forbidden: owner or admin role required" }, 403);
+  }
+
+  const member = await get<{ id: number; email: string; name: string; role: string; status: string }>(
+    "SELECT * FROM organization_members WHERE id = ? AND organization_id = ?",
+    [memberId, orgId]
+  );
+  if (!member) return c.json({ error: "Member not found" }, 404);
+
+  const org = await get<{ name: string }>("SELECT name FROM organizations WHERE id = ?", [orgId]);
+  const currentUser = getCurrentUser(c);
+  const appOrigin = c.req.header("Origin") || c.req.header("Referer")?.replace(/\/[^/]*$/, "") || "http://localhost:5173";
+
+  let emailResult: SendEmailResult = { ok: true, simulated: true };
+  try {
+    const emailCfg = await getEmailConfig(c);
+    const inviteHtml = renderInviteEmailHtml({
+      inviteeName: member.name,
+      inviteeEmail: member.email,
+      organizationName: org?.name || "Organization",
+      role: member.role,
+      inviterName: currentUser.name || undefined,
+      inviterEmail: currentUser.email || undefined,
+      appUrl: `${appOrigin}/organization`,
+    });
+
+    emailResult = await sendEmail(
+      emailCfg,
+      {
+        to: member.email,
+        subject: `Invitation to join ${org?.name || "OpenProperty"} (Resent)`,
+        html: inviteHtml,
+      },
+      c
+    );
+
+    await run("UPDATE organization_members SET updated_at = datetime('now') WHERE id = ?", [memberId]);
+  } catch (err) {
+    emailResult = { ok: false, error: (err as Error).message };
+  }
+
+  return c.json({ ok: emailResult.ok, email_result: emailResult });
 });
 
 const UpdateMemberInput = z.object({
@@ -2519,6 +2635,107 @@ app.post("/api/auth/test-connection", async (c) => {
       500,
     );
   }
+});
+
+// ── Email Sender & Outbound Delivery ────────────────────────────────
+
+app.get("/api/email/config", async (c) => {
+  const cfg = await getEmailConfig(c);
+  return c.json({
+    ...cfg,
+    smtpPass: cfg.smtpPass ? "••••••••" : "",
+    apiKey: cfg.apiKey ? (cfg.apiKey.length > 8 ? `${cfg.apiKey.slice(0, 4)}••••${cfg.apiKey.slice(-4)}` : "••••••••") : "",
+  });
+});
+
+app.put("/api/email/config", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
+  if (!body || typeof body !== "object") return c.json({ error: "Body must be an object" }, 400);
+  const d = body as Record<string, unknown>;
+
+  const updates: Record<string, string> = {};
+  if (d.enabled !== undefined) updates["email_enabled"] = d.enabled ? "true" : "false";
+  if (d.provider !== undefined) updates["email_provider"] = String(d.provider);
+  if (d.fromAddress !== undefined) updates["email_from_address"] = String(d.fromAddress);
+  if (d.fromName !== undefined) updates["email_from_name"] = String(d.fromName);
+  if (d.replyTo !== undefined) updates["email_reply_to"] = String(d.replyTo);
+  if (d.smtpHost !== undefined) updates["email_smtp_host"] = String(d.smtpHost);
+  if (d.smtpPort !== undefined) updates["email_smtp_port"] = String(d.smtpPort);
+  if (d.smtpSecure !== undefined) updates["email_smtp_secure"] = d.smtpSecure ? "true" : "false";
+  if (d.smtpUser !== undefined) updates["email_smtp_user"] = String(d.smtpUser);
+  if (d.smtpPass !== undefined && d.smtpPass !== "••••••••") updates["email_smtp_pass"] = String(d.smtpPass);
+  if (d.apiKey !== undefined && !String(d.apiKey).includes("••••")) updates["email_api_key"] = String(d.apiKey);
+
+  for (const [key, value] of Object.entries(updates)) {
+    await run(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+      [key, value]
+    );
+  }
+
+  const newCfg = await getEmailConfig(c);
+  return c.json({
+    ok: true,
+    config: {
+      ...newCfg,
+      smtpPass: newCfg.smtpPass ? "••••••••" : "",
+      apiKey: newCfg.apiKey ? (newCfg.apiKey.length > 8 ? `${newCfg.apiKey.slice(0, 4)}••••${newCfg.apiKey.slice(-4)}` : "••••••••") : "",
+    },
+  });
+});
+
+app.post("/api/email/test", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { body = {}; }
+  const d = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+
+  const targetEmail = String(d.to || "").trim();
+  if (!targetEmail || !targetEmail.includes("@")) {
+    return c.json({ ok: false, error: "Please provide a valid recipient email address for testing." }, 400);
+  }
+
+  const currentCfg = await getEmailConfig(c);
+  const cfgToTest: EmailConfig = {
+    ...currentCfg,
+    enabled: true, // test mode sends even if global toggle is off
+    provider: (d.provider ? String(d.provider) : currentCfg.provider) as EmailProvider,
+    fromAddress: d.fromAddress ? String(d.fromAddress) : currentCfg.fromAddress,
+    fromName: d.fromName ? String(d.fromName) : currentCfg.fromName,
+    smtpHost: d.smtpHost ? String(d.smtpHost) : currentCfg.smtpHost,
+    smtpPort: d.smtpPort ? Number(d.smtpPort) : currentCfg.smtpPort,
+    smtpSecure: d.smtpSecure !== undefined ? Boolean(d.smtpSecure) : currentCfg.smtpSecure,
+    smtpUser: d.smtpUser ? String(d.smtpUser) : currentCfg.smtpUser,
+    smtpPass: d.smtpPass && d.smtpPass !== "••••••••" ? String(d.smtpPass) : currentCfg.smtpPass,
+    apiKey: d.apiKey && !String(d.apiKey).includes("••••") ? String(d.apiKey) : currentCfg.apiKey,
+  };
+
+  const html = renderTestEmailHtml(cfgToTest.provider, cfgToTest.fromAddress);
+  const result = await sendEmail(
+    cfgToTest,
+    {
+      to: targetEmail,
+      subject: `[OpenProperty] Email Sender Test (${cfgToTest.provider.toUpperCase()})`,
+      html,
+    },
+    c
+  );
+
+  return c.json(result);
+});
+
+app.get("/api/email/logs", async (c) => {
+  const rows = await query<{
+    id: number;
+    to_email: string;
+    subject: string;
+    provider: string;
+    status: string;
+    error: string | null;
+    created_at: string;
+  }>("SELECT * FROM email_logs ORDER BY id DESC LIMIT 50").catch(() => []);
+  return c.json({ logs: rows });
 });
 
 // ── Operating Costs ────────────────────────────────────────────────

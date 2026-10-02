@@ -423,13 +423,13 @@ export function useAppState() {
     }
   }, [activeOrganization?.id]);
 
-  const inviteOrganizationMember = useCallback(async (data: InviteMemberInput, orgId?: number): Promise<OrganizationMember> => {
+  const inviteOrganizationMember = useCallback(async (data: InviteMemberInput, orgId?: number): Promise<{ member: OrganizationMember; email_result?: { ok: boolean; simulated?: boolean; error?: string; messageId?: string } }> => {
     const targetId = orgId || activeOrganization?.id;
     if (!targetId) throw new Error("No active organization");
-    const res = await api<{ member: OrganizationMember }>("POST", `/api/organizations/${targetId}/members`, data);
+    const res = await api<{ member: OrganizationMember; email_result?: { ok: boolean; simulated?: boolean; error?: string; messageId?: string } }>("POST", `/api/organizations/${targetId}/members`, data);
     await listOrganizationMembers(targetId);
     await refreshOrganizations();
-    return res.member;
+    return res;
   }, [activeOrganization?.id, listOrganizationMembers, refreshOrganizations]);
 
   const updateOrganizationMember = useCallback(async (
@@ -456,6 +456,17 @@ export function useAppState() {
     await refreshOrganizations();
   }, [activeOrganization?.id, listOrganizationMembers, refreshOrganizations]);
 
+  const resendOrganizationInvite = useCallback(async (memberId: number, orgId?: number): Promise<{ ok: boolean; email_result?: any }> => {
+    const targetId = orgId || activeOrganization?.id;
+    if (!targetId) throw new Error("No active organization");
+    const res = await api<{ ok: boolean; email_result?: any }>(
+      "POST",
+      `/api/organizations/${targetId}/members/${memberId}/resend-invite`
+    );
+    await listOrganizationMembers(targetId);
+    return res;
+  }, [activeOrganization?.id, listOrganizationMembers]);
+
   const switchSimulatedUser = useCallback(async (email: string | null) => {
     setSimulatedUser(email);
     setSimulatedUserState(email);
@@ -477,6 +488,7 @@ export function useAppState() {
     // organizations
     switchOrganization, createOrganization, updateOrganization, deleteOrganization,
     listOrganizationMembers, inviteOrganizationMember, updateOrganizationMember, removeOrganizationMember,
+    resendOrganizationInvite,
     switchSimulatedUser,
     // properties / units
     createProperty, updateProperty, deleteProperty,

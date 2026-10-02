@@ -272,3 +272,15 @@ CREATE TABLE IF NOT EXISTS airbnb_bookings (
 CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_unit ON airbnb_bookings(unit_id);
 CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_dates ON airbnb_bookings(check_in_date, check_out_date);
 CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_status ON airbnb_bookings(booking_status);
+
+-- ── Email Delivery Logs ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS email_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  status TEXT NOT NULL, -- 'sent' | 'failed' | 'simulated'
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_email_logs_created ON email_logs(created_at DESC);
