@@ -626,22 +626,32 @@ export function UnitPage({ id, propertyId: initialPropertyId, navigate }: Props)
               {/* Assigned Cleaner */}
               <div className="flex items-center justify-between p-2 rounded-md border bg-muted/20">
                 <div className="min-w-0 pr-2">
-                  <span className="text-[10px] text-muted-foreground block uppercase font-medium">Assigned Cleaner</span>
+                  <span className="text-[10px] text-muted-foreground block uppercase font-medium">Assigned Turnover Cleaner</span>
                   <span className="font-semibold truncate block text-foreground flex items-center gap-1.5">
                     <Sparkles className="size-3 text-teal-600 shrink-0" />
                     {unit.cleaner_name ? `${unit.cleaner_name} (${unit.cleaner_email || ""})` : "No cleaner assigned"}
                   </span>
                 </div>
-                {navigate && (
+                <div className="flex items-center gap-1.5 shrink-0">
                   <Button
                     size="sm"
-                    variant="ghost"
-                    className="h-6 text-[11px] text-teal-700 dark:text-teal-400 hover:bg-teal-500/10 px-2"
-                    onClick={() => navigate("/cleaner")}
+                    variant="outline"
+                    className="h-6 text-[11px] text-teal-700 dark:text-teal-400 border-teal-500/30 hover:bg-teal-500/10 px-2"
+                    onClick={() => setEditUnitOpen(true)}
                   >
-                    Schedule &rarr;
+                    Change Cleaner
                   </Button>
-                )}
+                  {navigate && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[11px] text-teal-700 dark:text-teal-400 hover:bg-teal-500/10 px-2"
+                      onClick={() => navigate("/cleaner")}
+                    >
+                      Schedule &rarr;
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {unit.airbnb_house_rules && (

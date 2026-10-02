@@ -73,6 +73,11 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
   const [cleanerEmail, setCleanerEmail] = useState("");
   const [invitingCleaner, setInvitingCleaner] = useState(false);
 
+  // Assign units modal
+  const [assignUnitsCleaner, setAssignUnitsCleaner] = useState<OrganizationMember | null>(null);
+  const [assignedUnitIds, setAssignedUnitIds] = useState<number[]>([]);
+  const [savingUnitAssignments, setSavingUnitAssignments] = useState(false);
+
   async function loadData() {
     try {
       setLoading(true);
@@ -200,6 +205,42 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
       app.setError((err as Error).message);
     } finally {
       setInvitingCleaner(false);
+    }
+  };
+
+  const handleOpenAssignModal = (cleaner: OrganizationMember) => {
+    setAssignUnitsCleaner(cleaner);
+    const currentUnitIds = airbnbUnits.filter((u) => u.cleaner_id === cleaner.id).map((u) => u.id);
+    setAssignedUnitIds(currentUnitIds);
+  };
+
+  const handleToggleUnitAssignment = (unitId: number) => {
+    setAssignedUnitIds((prev) =>
+      prev.includes(unitId) ? prev.filter((id) => id !== unitId) : [...prev, unitId]
+    );
+  };
+
+  const handleSaveUnitAssignments = async () => {
+    if (!assignUnitsCleaner) return;
+    setSavingUnitAssignments(true);
+    try {
+      const cleanerId = assignUnitsCleaner.id;
+      for (const unit of airbnbUnits) {
+        const isSelected = assignedUnitIds.includes(unit.id);
+        if (isSelected && unit.cleaner_id !== cleanerId) {
+          await app.updateUnit(unit.id, { cleaner_id: cleanerId });
+        } else if (!isSelected && unit.cleaner_id === cleanerId) {
+          await app.updateUnit(unit.id, { cleaner_id: null });
+        }
+      }
+      showToast(`Updated assigned Airbnb units for ${assignUnitsCleaner.name}!`);
+      setAssignUnitsCleaner(null);
+      await app.refreshLookups();
+      await loadData();
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setSavingUnitAssignments(false);
     }
   };
 
@@ -341,6 +382,18 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
                   <div className="pt-1 flex items-center justify-between text-xs text-muted-foreground border-t border-border/50">
                     <span>Assigned Units: <strong className="text-foreground">{assignedUnits.length}</strong></span>
                     <span>Active Tasks: <strong className="text-teal-600 font-bold">{assignedTaskCount}</strong></span>
+                  </div>
+
+                  <div className="pt-2 border-t border-border/40">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenAssignModal(cleaner)}
+                      className="h-7 text-xs w-full justify-center gap-1.5 border-teal-500/30 text-teal-700 dark:text-teal-300 hover:bg-teal-500/10 font-medium"
+                    >
+                      <Home className="size-3 text-teal-600" />
+                      Assign Units ({assignedUnits.length})
+                    </Button>
                   </div>
                 </div>
               );
@@ -738,6 +791,84 @@ export function TurnoverCleanersTab({ airbnbUnits, navigate }: Props) {
               className="bg-teal-600 hover:bg-teal-700 text-white font-semibold gap-1.5"
             >
               <UserCheck className="size-3.5" /> Save Cleaner Profile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Units to Cleaner Modal */}
+      <Dialog open={!!assignUnitsCleaner} onOpenChange={(open) => !open && setAssignUnitsCleaner(null)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Sparkles className="size-5 text-teal-600" />
+              Assign Units to {assignUnitsCleaner?.name}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Select which Airbnb units {assignUnitsCleaner?.name} is responsible for cleaning. When guests check out from these units, turnover cleaning schedules are assigned automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2 max-h-[340px] overflow-y-auto">
+            {airbnbUnits.length === 0 ? (
+              <div className="p-4 text-center text-xs text-muted-foreground">
+                No Airbnb units found in this organization.
+              </div>
+            ) : (
+              airbnbUnits.map((unit) => {
+                const isChecked = assignedUnitIds.includes(unit.id);
+                const assignedToOther = unit.cleaner_id && unit.cleaner_id !== assignUnitsCleaner?.id;
+                const otherCleaner = assignedToOther ? cleaners.find((c) => c.id === unit.cleaner_id) : null;
+
+                return (
+                  <label
+                    key={unit.id}
+                    className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer select-none ${
+                      isChecked
+                        ? "border-teal-500/60 bg-teal-500/10"
+                        : "border-border/60 bg-card hover:border-border"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => handleToggleUnitAssignment(unit.id)}
+                      className="mt-0.5 size-4 rounded border-border text-teal-600 focus:ring-teal-500"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-xs text-foreground">{unit.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{unit.property_name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                        {unit.airbnb_lockbox_code && <span>Lockbox: {unit.airbnb_lockbox_code}</span>}
+                        {assignedToOther && (
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">
+                            Currently: {otherCleaner?.name || "Another cleaner"}
+                          </span>
+                        )}
+                        {!unit.cleaner_id && (
+                          <span className="text-muted-foreground italic">Currently unassigned</span>
+                        )}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setAssignUnitsCleaner(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveUnitAssignments}
+              disabled={savingUnitAssignments}
+              className="bg-teal-600 hover:bg-teal-700 text-white font-semibold gap-1.5"
+            >
+              {savingUnitAssignments ? "Saving…" : "Save Assignments"}
             </Button>
           </DialogFooter>
         </DialogContent>
