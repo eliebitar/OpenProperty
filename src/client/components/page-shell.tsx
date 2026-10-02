@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useApp } from "@/context";
 import { OrganizationSwitcher } from "./organization/organization-switcher";
 
 /**
@@ -27,6 +28,9 @@ export function PageShell({
   width?: string;
   children: React.ReactNode;
 }) {
+  const app = useApp();
+  const isCleaner = app.activeOrganization?.user_role === "cleaner";
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-6">
@@ -40,7 +44,7 @@ export function PageShell({
         )}
         <div className="flex shrink-0 items-center gap-2.5">
           <OrganizationSwitcher
-            onNavigateOrganization={() => {
+            onNavigateOrganization={isCleaner ? undefined : () => {
               window.history.pushState(null, "", "/organization");
               window.dispatchEvent(new PopStateEvent("popstate"));
             }}

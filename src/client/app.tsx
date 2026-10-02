@@ -20,6 +20,7 @@ import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { OrganizationPage } from "./components/organization/organization-page";
 import { CleanerPage } from "./components/cleaner/cleaner-page";
+import { Sparkles } from "lucide-react";
 
 /**
  * The navigation, defined once.
@@ -51,6 +52,10 @@ const ADMIN: AppNavItem[] = [
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 
+const CLEANER_NAV: AppNavItem[] = [
+  { id: "cleaner", label: "My Cleaning Tasks", href: "/cleaner", icon: "sparkles", color: "teal", home: true },
+];
+
 /** A record page keeps its collection's row lit. */
 function activeFor(route: Route): string {
   if (route.name === "property" || route.name === "unit") return "properties";
@@ -70,18 +75,41 @@ export function App() {
 
 function AppContent() {
   const state = useAppState();
+  const auth = useAuth();
   const { path, route, navigate } = useRouter();
+
+  // Determine if the current logged-in user is a cleaner
+  const userRole = state.activeOrganization?.user_role;
+  const isCleaner =
+    userRole === "cleaner" ||
+    auth.user?.roles?.includes("cleaner") ||
+    state.organizationMembers.some(
+      (m) =>
+        m.role === "cleaner" &&
+        (m.email.toLowerCase() === auth.user?.email?.toLowerCase() ||
+         m.email.toLowerCase() === state.simulatedUser?.toLowerCase())
+    );
 
   // Lets the dashboard restore this exact screen on reload.
   useEffect(() => {
     reportLocation(path);
   }, [path]);
 
-  const groups = [
-    { items: PORTFOLIO },
-    { label: "Operations", items: OPERATIONS },
-    { label: "Admin", items: ADMIN },
-  ];
+  // When a cleaner logs in or tries to access any non-cleaner page, redirect to /cleaner
+  useEffect(() => {
+    if (!state.loading && isCleaner && route.name !== "cleaner") {
+      navigate("/cleaner");
+    }
+  }, [state.loading, isCleaner, route.name, navigate]);
+
+  // For cleaners: hide all portfolio, operations, and admin pages; only show My Cleaning Tasks
+  const groups = isCleaner
+    ? [{ items: CLEANER_NAV }]
+    : [
+        { items: PORTFOLIO },
+        { label: "Operations", items: OPERATIONS },
+        { label: "Admin", items: ADMIN },
+      ];
 
   return (
     <AppContext.Provider value={state}>
@@ -94,17 +122,36 @@ function AppContent() {
             title="OpenProperty"
             icon="home"
             groups={groups}
-            active={activeFor(route)}
-            onNavigate={(item) => navigate(item.href ?? "/dashboard")}
+            active={isCleaner ? "cleaner" : activeFor(route)}
+            onNavigate={(item) => navigate(item.href ?? (isCleaner ? "/cleaner" : "/dashboard"))}
           >
-            <UserMenu onNavigateSettings={() => navigate("/settings")} />
+            <UserMenu onNavigateSettings={isCleaner ? undefined : () => navigate("/settings")} />
           </AppNav>
         </div>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Quick exit bar when simulating cleaner in local development mode */}
+          {state.simulatedUser && isCleaner && (
+            <div className="flex shrink-0 items-center justify-between border-b border-teal-500/20 bg-teal-500/10 px-4 py-1.5 text-xs text-teal-800 dark:text-teal-300">
+              <div className="flex items-center gap-1.5 font-medium">
+                <Sparkles className="h-3.5 w-3.5 text-teal-600" />
+                <span>Simulating Cleaner View: <strong>{state.simulatedUser}</strong></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => state.switchSimulatedUser(null)}
+                className="cursor-pointer rounded bg-teal-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-teal-700 transition-colors shadow-2xs"
+              >
+                Exit Cleaner View &rarr;
+              </button>
+            </div>
+          )}
+
           {state.loading ? (
             <div className="flex flex-1 items-center justify-center text-muted-foreground">
               Loading…
             </div>
+          ) : isCleaner ? (
+            <CleanerPage navigate={navigate} />
           ) : (
             <>
               {route.name === "dashboard" && <DashboardPage navigate={navigate} />}

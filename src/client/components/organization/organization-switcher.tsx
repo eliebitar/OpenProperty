@@ -198,15 +198,17 @@ export function OrganizationSwitcher({
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem
-            onClick={() => setCreateDialogOpen(true)}
-            className="flex cursor-pointer items-center gap-2 py-1.5 text-xs font-medium text-primary hover:text-primary"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Create New Organization</span>
-          </DropdownMenuItem>
+          {currentRole !== "cleaner" && (
+            <DropdownMenuItem
+              onClick={() => setCreateDialogOpen(true)}
+              className="flex cursor-pointer items-center gap-2 py-1.5 text-xs font-medium text-primary hover:text-primary"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Create New Organization</span>
+            </DropdownMenuItem>
+          )}
 
-          {onNavigateOrganization && (
+          {currentRole !== "cleaner" && onNavigateOrganization && (
             <DropdownMenuItem
               onClick={onNavigateOrganization}
               className="flex cursor-pointer items-center gap-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"

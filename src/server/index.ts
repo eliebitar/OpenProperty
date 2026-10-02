@@ -613,11 +613,19 @@ async function getUserAllowedOrgIds(c: Context<Env>): Promise<number[]> {
     ).catch(() => {});
   }
 
+  // Automatically activate invited member upon login
+  if (email) {
+    run(
+      "UPDATE organization_members SET status = 'active' WHERE LOWER(email) = ? AND status = 'invited'",
+      [email]
+    ).catch(() => {});
+  }
+
   const rows = await query<{ organization_id: number }>(
     `SELECT DISTINCT m.organization_id
      FROM organization_members m
      JOIN organizations o ON o.id = m.organization_id
-     WHERE m.status = 'active' AND (${conditions.join(" OR ")})
+     WHERE m.status IN ('active', 'invited') AND (${conditions.join(" OR ")})
      ORDER BY m.organization_id ASC`,
     params
   ).catch(() => []);
@@ -651,7 +659,7 @@ async function getUserOrgRole(c: Context<Env>, orgId: number): Promise<string | 
 
   const row = await get<{ role: string }>(
     `SELECT role FROM organization_members
-     WHERE organization_id = ? AND status = 'active' AND (${userConds.join(" OR ")})
+     WHERE organization_id = ? AND status IN ('active', 'invited') AND (${userConds.join(" OR ")})
      LIMIT 1`,
     params
   ).catch(() => null);

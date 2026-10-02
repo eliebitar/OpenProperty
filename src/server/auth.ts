@@ -221,6 +221,18 @@ export const authMiddleware: MiddlewareHandler<ServerEnv> = async (c, next) => {
     }
   }
 
+  // Check for local simulation header (dev testing / local role simulation)
+  const simUser = c.req.header("X-Simulated-User")?.trim().toLowerCase();
+  if (simUser) {
+    c.set("user", {
+      id: "sim-" + simUser,
+      username: simUser,
+      email: simUser,
+      roles: [],
+    });
+    return next();
+  }
+
   // No token provided
   if (config.authRequired && !isPublicAuthRoute) {
     return c.json(
