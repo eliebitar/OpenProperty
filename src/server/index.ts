@@ -119,6 +119,110 @@ async function ensureSeeded(): Promise<void> {
     await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_dates ON airbnb_bookings(check_in_date, check_out_date)");
     await run("CREATE INDEX IF NOT EXISTS idx_airbnb_bookings_status ON airbnb_bookings(booking_status)");
 
+    // Organizations and Organization Members DDL & seeding
+    await run(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS organization_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id TEXT,
+        email TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'manager',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(organization_id, email)
+      )
+    `);
+
+    await run("CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_org_members_email ON organization_members(email)");
+
+    // Add organization_id to properties table
+    try {
+      await run("ALTER TABLE properties ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE");
+    } catch {
+      // Column already exists
+    }
+    await run("CREATE INDEX IF NOT EXISTS idx_properties_org ON properties(organization_id)");
+
+    // Add organization_id to tenants table
+    try {
+      await run("ALTER TABLE tenants ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE");
+    } catch {
+      // Column already exists
+    }
+    await run("CREATE INDEX IF NOT EXISTS idx_tenants_org ON tenants(organization_id)");
+
+    // Ensure default organization exists
+    const orgCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM organizations");
+    let defaultOrgId = 1;
+    if ((orgCount?.n ?? 0) === 0) {
+      const res = await run(
+        "INSERT INTO organizations (id, name, slug, description) VALUES (1, 'Primary Portfolio', 'primary-portfolio', 'Default real estate portfolio and properties')"
+      );
+      defaultOrgId = res.lastInsertRowid ? Number(res.lastInsertRowid) : 1;
+    } else {
+      const firstOrg = await get<{ id: number }>("SELECT id FROM organizations ORDER BY id ASC LIMIT 1");
+      if (firstOrg?.id) defaultOrgId = firstOrg.id;
+    }
+
+    // Ensure all existing properties (including real property Mauerstraße 15) and tenants are associated with default organization
+    await run("UPDATE properties SET organization_id = ? WHERE organization_id IS NULL", [defaultOrgId]);
+    await run("UPDATE tenants SET organization_id = ? WHERE organization_id IS NULL", [defaultOrgId]);
+
+    // Seed default team members for the organization if empty
+    const memberCount = await get<{ n: number }>("SELECT COUNT(*) as n FROM organization_members WHERE organization_id = ?", [defaultOrgId]);
+    if ((memberCount?.n ?? 0) === 0) {
+      await run(
+        `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+         VALUES (?, '206532d2-d8af-4ef0-bdcd-6a9c2d444b57', 'admin@openproperty.local', 'Alex Admin', 'owner', 'active')`,
+        [defaultOrgId]
+      );
+      await run(
+        `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+         VALUES (?, '388572cb-5970-481c-8aab-c9616e28242c', 'anna.karpinski7@gmail.com', 'Anna Karpinski', 'owner', 'active')`,
+        [defaultOrgId]
+      );
+      await run(
+        `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+         VALUES (?, NULL, 'elie.bitar7@gmail.com', 'Elie Bitar', 'owner', 'active')`,
+        [defaultOrgId]
+      );
+    }
+    await run(
+      `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+       VALUES (?, '388572cb-5970-481c-8aab-c9616e28242c', 'anna.karpinski7@gmail.com', 'Anna Karpinski', 'owner', 'active')`,
+      [defaultOrgId]
+    );
+    await run(
+      `INSERT OR IGNORE INTO organization_members (organization_id, user_id, email, name, role, status)
+       VALUES (?, NULL, 'elie.bitar7@gmail.com', 'Elie Bitar', 'owner', 'active')`,
+      [defaultOrgId]
+    );
+
+    // Clean up any corrupt user_id linkage so user IDs match exact email
+    await run(
+      "UPDATE organization_members SET user_id = '206532d2-d8af-4ef0-bdcd-6a9c2d444b57' WHERE LOWER(email) = 'admin@openproperty.local'",
+    );
+    await run(
+      "UPDATE organization_members SET user_id = '388572cb-5970-481c-8aab-c9616e28242c' WHERE LOWER(email) = 'anna.karpinski7@gmail.com'",
+    );
+    await run(
+      "UPDATE organization_members SET user_id = NULL WHERE user_id = '4d558420-ae37-4f2a-9d66-7d704ce384dc' AND LOWER(email) != 'elie.bitar@eb-net.org'",
+    );
+
     const cleared = await get<{ value: string }>("SELECT value FROM settings WHERE key = 'sample_data_cleared'");
     if (cleared?.value === "true") {
       return;
@@ -274,6 +378,470 @@ function buildUpdate(fields: Record<string, unknown>): { sets: string[]; params:
   return { sets, params };
 }
 
+// ── Organizations & Team Members ──────────────────────────────────
+
+export interface CurrentUser {
+  email: string | null;
+  username: string | null;
+  userId: string | null;
+  name: string | null;
+  isAuthenticated: boolean;
+}
+
+function getCurrentUser(c: Context<Env>): CurrentUser {
+  const keycloakUser = c.get("user");
+  const simUser = c.req.header("X-Simulated-User")?.trim().toLowerCase();
+  const config = c.get("keycloakConfig");
+
+  // 1. Authenticated Keycloak user (real authenticated token ALWAYS takes precedence)
+  if (keycloakUser) {
+    const rawEmail = (keycloakUser.email || (keycloakUser.username?.includes("@") ? keycloakUser.username : null))?.trim().toLowerCase() || null;
+    const username = keycloakUser.username?.trim().toLowerCase() || null;
+    const name = keycloakUser.name || [keycloakUser.givenName, keycloakUser.familyName].filter(Boolean).join(" ") || keycloakUser.username || "User";
+    return {
+      email: rawEmail,
+      username,
+      userId: keycloakUser.id || null,
+      name,
+      isAuthenticated: true,
+    };
+  }
+
+  // 2. Explicit simulated user (dev testing / local switcher ONLY when NO real auth is present)
+  if (simUser) {
+    return {
+      email: simUser,
+      username: simUser,
+      userId: null,
+      name: simUser.split("@")[0],
+      isAuthenticated: true,
+    };
+  }
+
+  // 3. Local dev fallback when Keycloak is NOT enabled
+  if (config && !config.enabled) {
+    return {
+      email: "admin@openproperty.local",
+      username: "admin",
+      userId: "local-admin",
+      name: "Alex Admin",
+      isAuthenticated: true,
+    };
+  }
+
+  // 4. Keycloak is enabled but request has no valid user token
+  return {
+    email: null,
+    username: null,
+    userId: null,
+    name: null,
+    isAuthenticated: false,
+  };
+}
+
+async function getUserAllowedOrgIds(c: Context<Env>): Promise<number[]> {
+  const user = getCurrentUser(c);
+  if (!user.isAuthenticated) {
+    return [];
+  }
+
+  const email = user.email?.toLowerCase();
+  const username = user.username?.toLowerCase();
+  const userId = user.userId;
+
+  if (!email && !username && !userId) {
+    return [];
+  }
+
+  // An organization member is identified strictly by their email address.
+  // Never match a different email address via OR on user_id or username!
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (email) {
+    conditions.push("LOWER(m.email) = ?");
+    params.push(email);
+  } else if (username && username.includes("@")) {
+    conditions.push("LOWER(m.email) = ?");
+    params.push(username);
+  } else if (userId) {
+    conditions.push("m.user_id = ?");
+    params.push(userId);
+  }
+
+  if (conditions.length === 0) {
+    return [];
+  }
+
+  // Safely link user_id only to the exact matching email row
+  if (userId && email) {
+    run(
+      "UPDATE organization_members SET user_id = ? WHERE LOWER(email) = ? AND (user_id IS NULL OR user_id = '')",
+      [userId, email]
+    ).catch(() => {});
+  }
+
+  const rows = await query<{ organization_id: number }>(
+    `SELECT DISTINCT m.organization_id
+     FROM organization_members m
+     JOIN organizations o ON o.id = m.organization_id
+     WHERE m.status = 'active' AND (${conditions.join(" OR ")})
+     ORDER BY m.organization_id ASC`,
+    params
+  ).catch(() => []);
+
+  return rows.map((r) => r.organization_id);
+}
+
+async function getUserOrgRole(c: Context<Env>, orgId: number): Promise<string | null> {
+  const user = getCurrentUser(c);
+  if (!user.isAuthenticated) return null;
+
+  const email = user.email?.toLowerCase();
+  const username = user.username?.toLowerCase();
+  const userId = user.userId;
+
+  const userConds: string[] = [];
+  const params: unknown[] = [orgId];
+
+  if (email) {
+    userConds.push("LOWER(email) = ?");
+    params.push(email);
+  } else if (username && username.includes("@")) {
+    userConds.push("LOWER(email) = ?");
+    params.push(username);
+  } else if (userId) {
+    userConds.push("user_id = ?");
+    params.push(userId);
+  }
+
+  if (userConds.length === 0) return null;
+
+  const row = await get<{ role: string }>(
+    `SELECT role FROM organization_members
+     WHERE organization_id = ? AND status = 'active' AND (${userConds.join(" OR ")})
+     LIMIT 1`,
+    params
+  ).catch(() => null);
+
+  return row ? row.role : null;
+}
+
+async function getActiveOrganizationId(c: Context<Env>): Promise<number | null> {
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) {
+    return null;
+  }
+
+  const headerOrgId = c.req.header("X-Organization-Id");
+  if (headerOrgId) {
+    const parsed = parseInt(headerOrgId, 10);
+    if (Number.isFinite(parsed) && allowedOrgIds.includes(parsed)) {
+      return parsed;
+    }
+  }
+
+  return allowedOrgIds[0];
+}
+
+const OrganizationInput = z.object({
+  name: z.string().min(1, "Name is required"),
+  description: z.string().optional().nullable(),
+  slug: z.string().optional(),
+});
+
+app.get("/api/organizations", async (c) => {
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) {
+    return c.json({ organizations: [], active_organization_id: null });
+  }
+
+  const activeOrgId = await getActiveOrganizationId(c);
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+
+  const rows = await query<{
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    created_at: string;
+    property_count: number;
+    member_count: number;
+  }>(
+    `SELECT o.*,
+       (SELECT COUNT(*) FROM properties p WHERE p.organization_id = o.id) as property_count,
+       (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) as member_count
+     FROM organizations o
+     WHERE o.id IN (${placeholders})
+     ORDER BY o.name ASC`,
+    allowedOrgIds
+  );
+
+  const orgsWithRole = await Promise.all(
+    rows.map(async (org) => {
+      const role = await getUserOrgRole(c, org.id);
+      return {
+        ...org,
+        is_active: org.id === activeOrgId,
+        user_role: role || "viewer",
+        user_status: "active",
+      };
+    })
+  );
+
+  return c.json({ organizations: orgsWithRole, active_organization_id: activeOrgId });
+});
+
+app.get("/api/organizations/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid organization ID" }, 400);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(id)) {
+    return c.json({ error: "Access denied to this organization" }, 403);
+  }
+
+  const org = await get<{
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    created_at: string;
+    property_count: number;
+    member_count: number;
+  }>(
+    `SELECT o.*,
+       (SELECT COUNT(*) FROM properties p WHERE p.organization_id = o.id) as property_count,
+       (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) as member_count
+     FROM organizations o WHERE o.id = ?`,
+    [id]
+  );
+  if (!org) return c.json({ error: "Organization not found" }, 404);
+
+  const role = await getUserOrgRole(c, id);
+  return c.json({ organization: { ...org, user_role: role || "viewer" } });
+});
+
+app.post("/api/organizations", async (c) => {
+  const user = getCurrentUser(c);
+  if (!user.isAuthenticated) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const parsed = await parseJson(c, OrganizationInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+
+  let slug = (d.slug || d.name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!slug) slug = "org";
+
+  const existingSlug = await get<{ id: number }>("SELECT id FROM organizations WHERE slug = ?", [slug]);
+  if (existingSlug) {
+    slug = `${slug}-${Date.now().toString().slice(-4)}`;
+  }
+
+  const result = await run(
+    "INSERT INTO organizations (name, slug, description) VALUES (?, ?, ?)",
+    [d.name.trim(), slug, d.description?.trim() ?? null]
+  );
+  const newOrgId = Number(result.lastInsertRowid);
+
+  // Add the creator as owner in organization_members
+  const creatorEmail = (user.email || user.username || "user@openproperty.local").toLowerCase();
+  const creatorName = user.name || (creatorEmail.includes("@") ? creatorEmail.split("@")[0] : "Admin");
+
+  await run(
+    "INSERT INTO organization_members (organization_id, user_id, email, name, role, status) VALUES (?, ?, ?, ?, 'owner', 'active')",
+    [newOrgId, user.userId, creatorEmail, creatorName]
+  );
+
+  const org = await get("SELECT * FROM organizations WHERE id = ?", [newOrgId]);
+  return c.json({ organization: { ...org, user_role: "owner" } }, 201);
+});
+
+app.put("/api/organizations/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid organization ID" }, 400);
+
+  const role = await getUserOrgRole(c, id);
+  if (role !== "owner" && role !== "admin") {
+    return c.json({ error: "Forbidden: owner or admin role required" }, 403);
+  }
+
+  const parsed = await parseJson(c, OrganizationInput.partial());
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+  const { sets, params } = buildUpdate(parsed.data);
+  if (sets.length === 0) return c.json({ error: "No fields to update" }, 400);
+
+  sets.push("updated_at = datetime('now')");
+  params.push(id);
+  await run(`UPDATE organizations SET ${sets.join(", ")} WHERE id = ?`, params);
+
+  const org = await get("SELECT * FROM organizations WHERE id = ?", [id]);
+  return c.json({ organization: org });
+});
+
+app.delete("/api/organizations/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid organization ID" }, 400);
+
+  const role = await getUserOrgRole(c, id);
+  if (role !== "owner") {
+    return c.json({ error: "Forbidden: owner role required to delete organization" }, 403);
+  }
+
+  const userOrgs = await getUserAllowedOrgIds(c);
+  if (userOrgs.length <= 1) {
+    return c.json({ error: "Cannot delete your only remaining organization" }, 400);
+  }
+
+  await run("DELETE FROM organizations WHERE id = ?", [id]);
+  return c.json({ ok: true });
+});
+
+// Organization members
+app.get("/api/organizations/:id/members", async (c) => {
+  const orgId = intParam(c.req.param("id"));
+  if (!orgId) return c.json({ error: "Invalid organization ID" }, 400);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(orgId)) {
+    return c.json({ error: "Access denied to this organization" }, 403);
+  }
+
+  const members = await query(
+    `SELECT * FROM organization_members
+     WHERE organization_id = ?
+     ORDER BY
+       CASE role
+         WHEN 'owner' THEN 1
+         WHEN 'admin' THEN 2
+         WHEN 'manager' THEN 3
+         ELSE 4
+       END, name ASC`,
+    [orgId]
+  );
+  return c.json({ members });
+});
+
+const AddMemberInput = z.object({
+  email: z.string().email(),
+  name: z.string().min(1, "Name is required"),
+  role: z.enum(["owner", "admin", "manager", "viewer"]).default("manager"),
+  status: z.enum(["active", "invited"]).default("active"),
+});
+
+app.post("/api/organizations/:id/members", async (c) => {
+  const orgId = intParam(c.req.param("id"));
+  if (!orgId) return c.json({ error: "Invalid organization ID" }, 400);
+
+  const role = await getUserOrgRole(c, orgId);
+  if (role !== "owner" && role !== "admin") {
+    return c.json({ error: "Forbidden: owner or admin role required to invite members" }, 403);
+  }
+
+  const parsed = await parseJson(c, AddMemberInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+
+  const existing = await get(
+    "SELECT id FROM organization_members WHERE organization_id = ? AND LOWER(email) = ?",
+    [orgId, d.email.trim().toLowerCase()]
+  );
+  if (existing) {
+    return c.json({ error: "A member with this email already belongs to this organization" }, 400);
+  }
+
+  const result = await run(
+    `INSERT INTO organization_members (organization_id, email, name, role, status)
+     VALUES (?, ?, ?, ?, ?)`,
+    [orgId, d.email.trim().toLowerCase(), d.name.trim(), d.role, d.status]
+  );
+
+  const member = await get("SELECT * FROM organization_members WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ member }, 201);
+});
+
+const UpdateMemberInput = z.object({
+  name: z.string().optional(),
+  role: z.enum(["owner", "admin", "manager", "viewer"]).optional(),
+  status: z.enum(["active", "invited"]).optional(),
+});
+
+app.put("/api/organizations/:id/members/:memberId", async (c) => {
+  const orgId = intParam(c.req.param("id"));
+  const memberId = intParam(c.req.param("memberId"));
+  if (!orgId || !memberId) return c.json({ error: "Invalid ID" }, 400);
+
+  const currentRole = await getUserOrgRole(c, orgId);
+  if (currentRole !== "owner" && currentRole !== "admin") {
+    return c.json({ error: "Forbidden: owner or admin role required" }, 403);
+  }
+
+  const member = await get<{ id: number; role: string }>(
+    "SELECT * FROM organization_members WHERE id = ? AND organization_id = ?",
+    [memberId, orgId]
+  );
+  if (!member) return c.json({ error: "Member not found" }, 404);
+
+  const parsed = await parseJson(c, UpdateMemberInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+
+  if (parsed.data.role && parsed.data.role !== "owner" && member.role === "owner") {
+    const ownerCount = await get<{ n: number }>(
+      "SELECT COUNT(*) as n FROM organization_members WHERE organization_id = ? AND role = 'owner'",
+      [orgId]
+    );
+    if ((ownerCount?.n ?? 0) <= 1) {
+      return c.json({ error: "Cannot demote the last owner. Transfer ownership or add another owner first." }, 400);
+    }
+  }
+
+  const { sets, params } = buildUpdate(parsed.data);
+  if (sets.length > 0) {
+    sets.push("updated_at = datetime('now')");
+    params.push(memberId, orgId);
+    await run(`UPDATE organization_members SET ${sets.join(", ")} WHERE id = ? AND organization_id = ?`, params);
+  }
+
+  const updated = await get("SELECT * FROM organization_members WHERE id = ?", [memberId]);
+  return c.json({ member: updated });
+});
+
+app.delete("/api/organizations/:id/members/:memberId", async (c) => {
+  const orgId = intParam(c.req.param("id"));
+  const memberId = intParam(c.req.param("memberId"));
+  if (!orgId || !memberId) return c.json({ error: "Invalid ID" }, 400);
+
+  const currentRole = await getUserOrgRole(c, orgId);
+  if (currentRole !== "owner" && currentRole !== "admin") {
+    return c.json({ error: "Forbidden: owner or admin role required" }, 403);
+  }
+
+  const member = await get<{ id: number; role: string }>(
+    "SELECT * FROM organization_members WHERE id = ? AND organization_id = ?",
+    [memberId, orgId]
+  );
+  if (!member) return c.json({ error: "Member not found" }, 404);
+
+  if (member.role === "owner") {
+    const ownerCount = await get<{ n: number }>(
+      "SELECT COUNT(*) as n FROM organization_members WHERE organization_id = ? AND role = 'owner'",
+      [orgId]
+    );
+    if ((ownerCount?.n ?? 0) <= 1) {
+      return c.json({ error: "Cannot remove the only owner of this organization." }, 400);
+    }
+  }
+
+  await run("DELETE FROM organization_members WHERE id = ? AND organization_id = ?", [memberId, orgId]);
+  return c.json({ ok: true });
+});
+
 // ── Properties ─────────────────────────────────────────────────────
 
 const PropertyInput = z.object({
@@ -286,14 +854,23 @@ const PropertyInput = z.object({
   year_built: z.number().int().optional().nullable(),
   notes: z.string().optional().nullable(),
   color: z.string().optional(),
+  organization_id: z.number().int().optional().nullable(),
 });
 
 app.get("/api/properties", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) {
+    return c.json({ properties: [] });
+  }
+
   const rows = await query(
     `SELECT p.*,
        (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id) as unit_count,
        (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id AND u.status = 'occupied') as occupied_count
-     FROM properties p ORDER BY p.name`,
+     FROM properties p
+     WHERE p.organization_id = ?
+     ORDER BY p.name`,
+    [activeOrgId]
   );
   return c.json({ properties: rows });
 });
@@ -301,19 +878,38 @@ app.get("/api/properties", async (c) => {
 app.get("/api/properties/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get("SELECT * FROM properties WHERE id = ?", [id]);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const row = await get(
+    `SELECT * FROM properties WHERE id = ? AND organization_id IN (${placeholders})`,
+    [id, ...allowedOrgIds]
+  );
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ property: row });
 });
 
 app.post("/api/properties", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) {
+    return c.json({ error: "You must belong to an organization to create properties" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, activeOrgId);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot create properties" }, 403);
+  }
+
   const parsed = await parseJson(c, PropertyInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
   const result = await run(
-    `INSERT INTO properties (name, type, address, city, state, zip, year_built, notes, color)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.name, d.type ?? "single_family", d.address ?? null, d.city ?? null, d.state ?? null, d.zip ?? null, d.year_built ?? null, d.notes ?? null, d.color ?? "sky"],
+    `INSERT INTO properties (organization_id, name, type, address, city, state, zip, year_built, notes, color)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [activeOrgId, d.name, d.type ?? "single_family", d.address ?? null, d.city ?? null, d.state ?? null, d.zip ?? null, d.year_built ?? null, d.notes ?? null, d.color ?? "sky"],
   );
   const row = await get("SELECT * FROM properties WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ property: row }, 201);
@@ -322,6 +918,20 @@ app.post("/api/properties", async (c) => {
 app.put("/api/properties/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const prop = await get<{ id: number; organization_id: number }>("SELECT id, organization_id FROM properties WHERE id = ?", [id]);
+  if (!prop) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(prop.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot modify properties" }, 403);
+  }
+
   const parsed = await parseJson(c, PropertyInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -336,6 +946,20 @@ app.put("/api/properties/:id", async (c) => {
 app.delete("/api/properties/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const prop = await get<{ id: number; organization_id: number }>("SELECT id, organization_id FROM properties WHERE id = ?", [id]);
+  if (!prop) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(prop.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role !== "owner" && role !== "admin") {
+    return c.json({ error: "Forbidden: only owners and admins can delete properties" }, 403);
+  }
+
   const r = await run("DELETE FROM properties WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -391,11 +1015,14 @@ const UNIT_SELECT = `
 app.get("/api/units", async (c) => {
   const propertyId = intParam(c.req.query("property_id"));
   const status = c.req.query("status");
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ units: [] });
+
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
   if (propertyId) { where.push("u.property_id = ?"); params.push(propertyId); }
   if (status) { where.push("u.status = ?"); params.push(status); }
-  const sql = `${UNIT_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY p.name, u.name`;
+  const sql = `${UNIT_SELECT} WHERE ${where.join(" AND ")} ORDER BY p.name, u.name`;
   const rows = await query(sql, params);
   return c.json({ units: rows });
 });
@@ -403,7 +1030,12 @@ app.get("/api/units", async (c) => {
 app.get("/api/units/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [id]);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const row = await get(`${UNIT_SELECT} WHERE u.id = ? AND p.organization_id IN (${placeholders})`, [id, ...allowedOrgIds]);
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ unit: row });
 });
@@ -412,6 +1044,20 @@ app.post("/api/units", async (c) => {
   const parsed = await parseJson(c, UnitInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  const prop = await get<{ id: number; organization_id: number }>("SELECT id, organization_id FROM properties WHERE id = ?", [d.property_id]);
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(prop.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot create units" }, 403);
+  }
+
   const result = await run(
     `INSERT INTO units (
        property_id, name, type, bedrooms, bathrooms, sqft, market_rent, monthly_operating_cost, status,
@@ -434,6 +1080,23 @@ app.post("/api/units", async (c) => {
 app.put("/api/units/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const unit = await get<{ id: number; organization_id: number }>(
+    "SELECT u.id, p.organization_id FROM units u JOIN properties p ON p.id = u.property_id WHERE u.id = ?",
+    [id]
+  );
+  if (!unit) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(unit.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, unit.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot modify units" }, 403);
+  }
+
   const parsed = await parseJson(c, UnitInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -460,6 +1123,23 @@ app.put("/api/units/:id", async (c) => {
 app.delete("/api/units/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const unit = await get<{ id: number; organization_id: number }>(
+    "SELECT u.id, p.organization_id FROM units u JOIN properties p ON p.id = u.property_id WHERE u.id = ?",
+    [id]
+  );
+  if (!unit) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(unit.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, unit.organization_id);
+  if (role !== "owner" && role !== "admin") {
+    return c.json({ error: "Forbidden: only owners and admins can delete units" }, 403);
+  }
+
   const r = await run("DELETE FROM units WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -469,11 +1149,21 @@ app.post("/api/units/:id/assign-tenant", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid unit ID" }, 400);
 
-  const unit = await get<{ id: number; market_rent: number; monthly_operating_cost: number }>(
-    "SELECT id, market_rent, monthly_operating_cost FROM units WHERE id = ?",
+  const unit = await get<{ id: number; organization_id: number; market_rent: number; monthly_operating_cost: number }>(
+    "SELECT u.id, p.organization_id, u.market_rent, u.monthly_operating_cost FROM units u JOIN properties p ON p.id = u.property_id WHERE u.id = ?",
     [id],
   );
   if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(unit.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, unit.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot assign tenants" }, 403);
+  }
 
   const body = await c.req.json().catch(() => ({})) as {
     tenant_id: number;
@@ -526,6 +1216,22 @@ app.post("/api/units/:id/unassign-tenant", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid unit ID" }, 400);
 
+  const unit = await get<{ id: number; organization_id: number }>(
+    "SELECT u.id, p.organization_id FROM units u JOIN properties p ON p.id = u.property_id WHERE u.id = ?",
+    [id],
+  );
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(unit.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, unit.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot unassign tenants" }, 403);
+  }
+
   // End all active leases for this unit
   await run("UPDATE leases SET status = 'ended' WHERE unit_id = ? AND status = 'active'", [id]);
   // Mark unit as vacant
@@ -550,24 +1256,26 @@ const TenantInput = z.object({
 });
 
 app.get("/api/tenants", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ tenants: [] });
+
   const search = c.req.query("q")?.trim();
+  const where: string[] = [
+    `(t.organization_id = ? OR t.id IN (
+       SELECT DISTINCT l.primary_tenant_id FROM leases l
+       JOIN units u ON u.id = l.unit_id
+       JOIN properties p ON p.id = u.property_id
+       WHERE p.organization_id = ? AND l.primary_tenant_id IS NOT NULL
+     ))`
+  ];
+  const params: unknown[] = [activeOrgId, activeOrgId];
+
   if (search) {
     const like = `%${search}%`;
-    const rows = await query(
-      `SELECT t.*,
-         (SELECT u.id FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_id,
-         (SELECT u.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_name,
-         (SELECT p.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id LEFT JOIN properties p ON p.id = u.property_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_property_name
-       FROM tenants t
-       WHERE t.last_name LIKE ? OR t.first_name LIKE ? OR t.email LIKE ? OR t.phone LIKE ?
-       ORDER BY t.last_name, t.first_name LIMIT 200`,
-      [like, like, like, like],
-    );
-    return c.json({ tenants: rows });
+    where.push("(t.last_name LIKE ? OR t.first_name LIKE ? OR t.email LIKE ? OR t.phone LIKE ?)");
+    params.push(like, like, like, like);
   }
+
   const rows = await query(
     `SELECT t.*,
        (SELECT u.id FROM leases l LEFT JOIN units u ON u.id = l.unit_id
@@ -576,7 +1284,10 @@ app.get("/api/tenants", async (c) => {
           WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_name,
        (SELECT p.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id LEFT JOIN properties p ON p.id = u.property_id
           WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_property_name
-     FROM tenants t ORDER BY t.last_name, t.first_name LIMIT 500`,
+     FROM tenants t
+     WHERE ${where.join(" AND ")}
+     ORDER BY t.last_name, t.first_name LIMIT 500`,
+    params
   );
   return c.json({ tenants: rows });
 });
@@ -584,19 +1295,42 @@ app.get("/api/tenants", async (c) => {
 app.get("/api/tenants/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get("SELECT * FROM tenants WHERE id = ?", [id]);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const row = await get(
+    `SELECT * FROM tenants t
+     WHERE t.id = ? AND (
+       t.organization_id IN (${placeholders}) OR
+       t.id IN (
+         SELECT DISTINCT l.primary_tenant_id FROM leases l
+         JOIN units u ON u.id = l.unit_id
+         JOIN properties p ON p.id = u.property_id
+         WHERE p.organization_id IN (${placeholders}) AND l.primary_tenant_id IS NOT NULL
+       )
+     )`,
+    [id, ...allowedOrgIds, ...allowedOrgIds]
+  );
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ tenant: row });
 });
 
 app.post("/api/tenants", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ error: "You must belong to an organization to add tenants" }, 403);
+
+  const role = await getUserOrgRole(c, activeOrgId);
+  if (role === "viewer") return c.json({ error: "Viewers cannot create tenants" }, 403);
+
   const parsed = await parseJson(c, TenantInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO tenants (first_name, last_name, email, phone, date_of_birth, emergency_contact, employer, monthly_income, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.first_name, d.last_name, d.email ?? null, d.phone ?? null, d.date_of_birth ?? null, d.emergency_contact ?? null, d.employer ?? null, d.monthly_income ?? null, d.notes ?? null],
+    `INSERT INTO tenants (organization_id, first_name, last_name, email, phone, date_of_birth, emergency_contact, employer, monthly_income, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [activeOrgId, d.first_name, d.last_name, d.email ?? null, d.phone ?? null, d.date_of_birth ?? null, d.emergency_contact ?? null, d.employer ?? null, d.monthly_income ?? null, d.notes ?? null],
   );
   const row = await get("SELECT * FROM tenants WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ tenant: row }, 201);
@@ -605,6 +1339,26 @@ app.post("/api/tenants", async (c) => {
 app.put("/api/tenants/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const tenant = await get<{ id: number; organization_id: number | null }>(
+    `SELECT t.id, t.organization_id FROM tenants t
+     WHERE t.id = ? AND (
+       t.organization_id IN (${placeholders}) OR
+       t.id IN (
+         SELECT DISTINCT l.primary_tenant_id FROM leases l
+         JOIN units u ON u.id = l.unit_id
+         JOIN properties p ON p.id = u.property_id
+         WHERE p.organization_id IN (${placeholders}) AND l.primary_tenant_id IS NOT NULL
+       )
+     )`,
+    [id, ...allowedOrgIds, ...allowedOrgIds]
+  );
+  if (!tenant) return c.json({ error: "Not found" }, 404);
+
   const parsed = await parseJson(c, TenantInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -619,6 +1373,26 @@ app.put("/api/tenants/:id", async (c) => {
 app.delete("/api/tenants/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const tenant = await get<{ id: number }>(
+    `SELECT t.id FROM tenants t
+     WHERE t.id = ? AND (
+       t.organization_id IN (${placeholders}) OR
+       t.id IN (
+         SELECT DISTINCT l.primary_tenant_id FROM leases l
+         JOIN units u ON u.id = l.unit_id
+         JOIN properties p ON p.id = u.property_id
+         WHERE p.organization_id IN (${placeholders}) AND l.primary_tenant_id IS NOT NULL
+       )
+     )`,
+    [id, ...allowedOrgIds, ...allowedOrgIds]
+  );
+  if (!tenant) return c.json({ error: "Not found" }, 404);
+
   const r = await run("DELETE FROM tenants WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -657,12 +1431,15 @@ app.get("/api/leases", async (c) => {
   const status = c.req.query("status");
   const tenantId = intParam(c.req.query("tenant_id"));
   const unitId = intParam(c.req.query("unit_id"));
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ leases: [] });
+
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
   if (status) { where.push("l.status = ?"); params.push(status); }
   if (tenantId) { where.push("l.primary_tenant_id = ?"); params.push(tenantId); }
   if (unitId) { where.push("l.unit_id = ?"); params.push(unitId); }
-  const sql = `${LEASE_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY l.start_date DESC`;
+  const sql = `${LEASE_SELECT} WHERE ${where.join(" AND ")} ORDER BY l.start_date DESC`;
   const rows = await query(sql, params);
   return c.json({ leases: rows });
 });
@@ -670,7 +1447,12 @@ app.get("/api/leases", async (c) => {
 app.get("/api/leases/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get(`${LEASE_SELECT} WHERE l.id = ?`, [id]);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (allowedOrgIds.length === 0) return c.json({ error: "Not found" }, 404);
+
+  const placeholders = allowedOrgIds.map(() => "?").join(",");
+  const row = await get(`${LEASE_SELECT} WHERE l.id = ? AND p.organization_id IN (${placeholders})`, [id, ...allowedOrgIds]);
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ lease: row });
 });
@@ -679,6 +1461,23 @@ app.post("/api/leases", async (c) => {
   const parsed = await parseJson(c, LeaseInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  const unit = await get<{ id: number; organization_id: number }>(
+    "SELECT u.id, p.organization_id FROM units u JOIN properties p ON p.id = u.property_id WHERE u.id = ?",
+    [d.unit_id]
+  );
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(unit.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, unit.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot create leases" }, 403);
+  }
+
   const result = await run(
     `INSERT INTO leases (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, operating_cost_advance, heating_cost_advance, deposit, rent_due_day, late_fee, status, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -695,6 +1494,23 @@ app.post("/api/leases", async (c) => {
 app.put("/api/leases/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const lease = await get<{ id: number; organization_id: number }>(
+    "SELECT l.id, p.organization_id FROM leases l JOIN units u ON u.id = l.unit_id JOIN properties p ON p.id = u.property_id WHERE l.id = ?",
+    [id]
+  );
+  if (!lease) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(lease.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, lease.organization_id);
+  if (role === "viewer") {
+    return c.json({ error: "Viewers cannot modify leases" }, 403);
+  }
+
   const parsed = await parseJson(c, LeaseInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -723,15 +1539,29 @@ app.put("/api/leases/:id", async (c) => {
 app.delete("/api/leases/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const lease = await get<{ unit_id: number }>("SELECT unit_id FROM leases WHERE id = ?", [id]);
+
+  const lease = await get<{ id: number; unit_id: number; organization_id: number }>(
+    "SELECT l.id, l.unit_id, p.organization_id FROM leases l JOIN units u ON u.id = l.unit_id JOIN properties p ON p.id = u.property_id WHERE l.id = ?",
+    [id]
+  );
+  if (!lease) return c.json({ error: "Not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(lease.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
+  const role = await getUserOrgRole(c, lease.organization_id);
+  if (role !== "owner" && role !== "admin") {
+    return c.json({ error: "Forbidden: only owners and admins can delete leases" }, 403);
+  }
+
   const r = await run("DELETE FROM leases WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
 
-  if (lease) {
-    const activeCount = await get<{ n: number }>("SELECT COUNT(*) AS n FROM leases WHERE unit_id = ? AND status = 'active'", [lease.unit_id]);
-    if ((activeCount?.n ?? 0) === 0) {
-      await run("UPDATE units SET status = 'vacant' WHERE id = ?", [lease.unit_id]);
-    }
+  const activeCount = await get<{ n: number }>("SELECT COUNT(*) AS n FROM leases WHERE unit_id = ? AND status = 'active'", [lease.unit_id]);
+  if ((activeCount?.n ?? 0) === 0) {
+    await run("UPDATE units SET status = 'vacant' WHERE id = ?", [lease.unit_id]);
   }
 
   return c.json({ ok: true });
@@ -761,13 +1591,16 @@ const CHARGE_SELECT = `
 `;
 
 app.get("/api/rent-charges", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ charges: [] });
+
   const period = c.req.query("period");
   const status = c.req.query("status");
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
   if (period) { where.push("c.period = ?"); params.push(period); }
   if (status) { where.push("c.status = ?"); params.push(status); }
-  const sql = `${CHARGE_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY c.due_date, p.name, u.name`;
+  const sql = `${CHARGE_SELECT} WHERE ${where.join(" AND ")} ORDER BY c.due_date, p.name, u.name`;
   const rows = await query(sql, params).catch(() => []);
   return c.json({ charges: rows });
 });
@@ -776,6 +1609,18 @@ app.post("/api/rent-charges", async (c) => {
   const parsed = await parseJson(c, ChargeInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  const lease = await get<{ id: number; organization_id: number }>(
+    "SELECT l.id, p.organization_id FROM leases l JOIN units u ON u.id = l.unit_id JOIN properties p ON p.id = u.property_id WHERE l.id = ?",
+    [d.lease_id]
+  );
+  if (!lease) return c.json({ error: "Lease not found" }, 404);
+
+  const allowedOrgIds = await getUserAllowedOrgIds(c);
+  if (!allowedOrgIds.includes(lease.organization_id)) {
+    return c.json({ error: "Access denied" }, 403);
+  }
+
   const result = await run(
     `INSERT INTO rent_charges (lease_id, period, due_date, amount, notes) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(lease_id, period) DO NOTHING`,
@@ -791,11 +1636,19 @@ app.post("/api/rent-charges", async (c) => {
 
 // Generate (idempotent) charges for a given period across all active leases.
 app.post("/api/rent-charges/generate", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ created: 0, period: "" });
+
   const body = await c.req.json().catch(() => ({})) as { period?: string };
   const period = body.period;
   if (!period || !/^\d{4}-\d{2}$/.test(period)) return c.json({ error: "period (YYYY-MM) required" }, 400);
   const leases = await query<{ id: number; monthly_rent: number; operating_cost_advance: number; heating_cost_advance: number; rent_due_day: number; start_date: string; end_date: string }>(
-    "SELECT id, monthly_rent, operating_cost_advance, heating_cost_advance, rent_due_day, start_date, end_date FROM leases WHERE status = 'active'",
+    `SELECT l.id, l.monthly_rent, l.operating_cost_advance, l.heating_cost_advance, l.rent_due_day, l.start_date, l.end_date
+     FROM leases l
+     JOIN units u ON u.id = l.unit_id
+     JOIN properties p ON p.id = u.property_id
+     WHERE l.status = 'active' AND p.organization_id = ?`,
+    [activeOrgId]
   );
   let created = 0;
   for (const l of leases) {
@@ -980,15 +1833,18 @@ const WO_SELECT = `
 `;
 
 app.get("/api/work-orders", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ work_orders: [] });
+
   const status = c.req.query("status");
   const propertyId = intParam(c.req.query("property_id"));
   const unitId = intParam(c.req.query("unit_id"));
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
   if (status) { where.push("w.status = ?"); params.push(status); }
   if (propertyId) { where.push("w.property_id = ?"); params.push(propertyId); }
   if (unitId) { where.push("w.unit_id = ?"); params.push(unitId); }
-  const sql = `${WO_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY
+  const sql = `${WO_SELECT} WHERE ${where.join(" AND ")} ORDER BY
     CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
     w.created_at DESC`;
   const rows = await query(sql, params).catch(() => []);
@@ -999,6 +1855,14 @@ app.post("/api/work-orders", async (c) => {
   const parsed = await parseJson(c, WorkOrderInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  if (d.property_id) {
+    const prop = await get<{ id: number; organization_id: number }>("SELECT id, organization_id FROM properties WHERE id = ?", [d.property_id]);
+    if (!prop) return c.json({ error: "Property not found" }, 404);
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Access denied" }, 403);
+  }
+
   const result = await run(
     `INSERT INTO work_orders (property_id, unit_id, tenant_id, vendor_id, title, description, priority, status, scheduled_at, completed_at, cost, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1017,6 +1881,17 @@ app.post("/api/work-orders", async (c) => {
 app.put("/api/work-orders/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{ property_id: number | null }>("SELECT property_id FROM work_orders WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  if (existing.property_id) {
+    const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [existing.property_id]);
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!prop || !allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+    const role = await getUserOrgRole(c, prop.organization_id);
+    if (role === "viewer") return c.json({ error: "Viewers cannot edit work orders" }, 403);
+  }
+
   const parsed = await parseJson(c, WorkOrderInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -1031,6 +1906,17 @@ app.put("/api/work-orders/:id", async (c) => {
 app.delete("/api/work-orders/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{ property_id: number | null }>("SELECT property_id FROM work_orders WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  if (existing.property_id) {
+    const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [existing.property_id]);
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!prop || !allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+    const role = await getUserOrgRole(c, prop.organization_id);
+    if (role === "viewer") return c.json({ error: "Viewers cannot delete work orders" }, 403);
+  }
+
   const r = await run("DELETE FROM work_orders WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -1052,12 +1938,17 @@ const ApplicationInput = z.object({
 });
 
 app.get("/api/applications", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ applications: [] });
+
   const rows = await query(
     `SELECT a.*, u.name as unit_name, p.name as property_name
      FROM applications a
      LEFT JOIN units u ON u.id = a.unit_id
      LEFT JOIN properties p ON p.id = u.property_id
+     WHERE p.organization_id = ?
      ORDER BY a.created_at DESC`,
+    [activeOrgId]
   ).catch(() => []);
   return c.json({ applications: rows });
 });
@@ -1066,6 +1957,17 @@ app.post("/api/applications", async (c) => {
   const parsed = await parseJson(c, ApplicationInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  if (d.unit_id) {
+    const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [d.unit_id]);
+    if (!unit) return c.json({ error: "Unit not found" }, 404);
+    const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]);
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!prop || !allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Access denied" }, 403);
+    const role = await getUserOrgRole(c, prop.organization_id);
+    if (role === "viewer") return c.json({ error: "Viewers cannot create applications" }, 403);
+  }
+
   const result = await run(
     `INSERT INTO applications (unit_id, first_name, last_name, email, phone, monthly_income, employer, desired_move_in, status, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1087,6 +1989,18 @@ app.post("/api/applications", async (c) => {
 app.put("/api/applications/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{ unit_id: number | null }>("SELECT unit_id FROM applications WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  if (existing.unit_id) {
+    const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [existing.unit_id]);
+    const prop = unit ? await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!prop || !allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+    const role = await getUserOrgRole(c, prop.organization_id);
+    if (role === "viewer") return c.json({ error: "Viewers cannot edit applications" }, 403);
+  }
+
   const parsed = await parseJson(c, ApplicationInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const { sets, params } = buildUpdate(parsed.data);
@@ -1106,6 +2020,18 @@ app.put("/api/applications/:id", async (c) => {
 app.delete("/api/applications/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{ unit_id: number | null }>("SELECT unit_id FROM applications WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  if (existing.unit_id) {
+    const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [existing.unit_id]);
+    const prop = unit ? await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
+    const allowedOrgIds = await getUserAllowedOrgIds(c);
+    if (!prop || !allowedOrgIds.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+    const role = await getUserOrgRole(c, prop.organization_id);
+    if (role === "viewer") return c.json({ error: "Viewers cannot delete applications" }, 403);
+  }
+
   const r = await run("DELETE FROM applications WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -1116,11 +2042,40 @@ app.delete("/api/applications/:id", async (c) => {
 app.get("/api/dashboard/summary", async (c) => {
   const today = new Date().toISOString().slice(0, 10);
   const periodNow = today.slice(0, 7);
+  const activeOrgId = await getActiveOrganizationId(c);
+
+  if (!activeOrgId) {
+    return c.json({
+      period: periodNow,
+      properties: 0,
+      units: 0,
+      occupied: 0,
+      vacant: 0,
+      occupancy_rate: 0,
+      active_leases: 0,
+      upcoming_move_outs: 0,
+      month_outstanding: 0,
+      month_collected: 0,
+      overdue_total: 0,
+      overdue_count: 0,
+      open_work_orders: 0,
+      urgent_work_orders: 0,
+      recent_work_orders: [],
+      upcoming_expirations: [],
+      airbnb_units: 0,
+      airbnb_active_guests: 0,
+      airbnb_month_revenue: 0,
+      airbnb_upcoming_checkins: 0,
+    });
+  }
 
   const safeGet = <T,>(sql: string, params: unknown[] = [], fallback: T) =>
     get<T>(sql, params).catch(() => fallback as T | undefined).then((v) => v ?? fallback);
   const safeQuery = <T,>(sql: string, params: unknown[] = []): Promise<T[]> =>
     query<T>(sql, params).catch(() => [] as T[]);
+
+  const orgPropFilter = "p.organization_id = ?";
+  const orgPropSub = `(SELECT id FROM properties WHERE organization_id = ?)`;
 
   const [
     propertyCount,
@@ -1141,43 +2096,44 @@ app.get("/api/dashboard/summary", async (c) => {
     airbnbMonthRevenueRow,
     airbnbUpcomingCheckinsRow,
   ] = await Promise.all([
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM properties", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE status = 'occupied'", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE status = 'vacant'", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM leases WHERE status = 'active'", [], { n: 0 }),
+    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM properties WHERE organization_id = ?", [activeOrgId], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*) as n FROM units u JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter}`, [activeOrgId], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*) as n FROM units u JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND u.status = 'occupied'`, [activeOrgId], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*) as n FROM units u JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND u.status = 'vacant'`, [activeOrgId], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*) as n FROM leases l JOIN units u ON l.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND l.status = 'active'`, [activeOrgId], { n: 0 }),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM leases WHERE status = 'active' AND end_date <= date('now', '+30 days')",
-      [], { n: 0 },
+      `SELECT COUNT(*) as n FROM leases l JOIN units u ON l.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND l.status = 'active' AND l.end_date <= date('now', '+30 days')`,
+      [activeOrgId], { n: 0 },
     ),
     safeGet<{ total: number }>(
-      "SELECT COALESCE(SUM(amount - amount_paid), 0) as total FROM rent_charges WHERE period = ? AND status != 'waived'",
-      [periodNow], { total: 0 },
+      `SELECT COALESCE(SUM(rc.amount - rc.amount_paid), 0) as total FROM rent_charges rc JOIN leases l ON rc.lease_id = l.id JOIN units u ON l.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND rc.period = ? AND rc.status != 'waived'`,
+      [activeOrgId, periodNow], { total: 0 },
     ),
     safeGet<{ total: number }>(
-      "SELECT COALESCE(SUM(amount_paid), 0) as total FROM rent_charges WHERE period = ?",
-      [periodNow], { total: 0 },
+      `SELECT COALESCE(SUM(rc.amount_paid), 0) as total FROM rent_charges rc JOIN leases l ON rc.lease_id = l.id JOIN units u ON l.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND rc.period = ?`,
+      [activeOrgId, periodNow], { total: 0 },
     ),
     safeGet<{ total: number; n: number }>(
-      "SELECT COALESCE(SUM(amount - amount_paid), 0) as total, COUNT(*) as n FROM rent_charges WHERE due_date < date('now') AND amount_paid < amount AND status != 'waived'",
-      [], { total: 0, n: 0 },
+      `SELECT COALESCE(SUM(rc.amount - rc.amount_paid), 0) as total, COUNT(*) as n FROM rent_charges rc JOIN leases l ON rc.lease_id = l.id JOIN units u ON l.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND rc.due_date < date('now') AND rc.amount_paid < rc.amount AND rc.status != 'waived'`,
+      [activeOrgId], { total: 0, n: 0 },
     ),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM work_orders WHERE status NOT IN ('completed', 'cancelled')",
-      [], { n: 0 },
+      `SELECT COUNT(*) as n FROM work_orders w WHERE w.property_id IN ${orgPropSub} AND w.status NOT IN ('completed', 'cancelled')`,
+      [activeOrgId], { n: 0 },
     ),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM work_orders WHERE priority = 'urgent' AND status NOT IN ('completed', 'cancelled')",
-      [], { n: 0 },
+      `SELECT COUNT(*) as n FROM work_orders w WHERE w.property_id IN ${orgPropSub} AND w.priority = 'urgent' AND w.status NOT IN ('completed', 'cancelled')`,
+      [activeOrgId], { n: 0 },
     ),
     safeQuery<{ id: number; title: string; priority: string; status: string; property_name: string | null; unit_name: string | null; created_at: string }>(
       `SELECT w.id, w.title, w.priority, w.status, p.name as property_name, u.name as unit_name, w.created_at
        FROM work_orders w
-       LEFT JOIN properties p ON p.id = w.property_id
+       JOIN properties p ON p.id = w.property_id
        LEFT JOIN units u ON u.id = w.unit_id
-       WHERE w.status NOT IN ('completed', 'cancelled')
+       WHERE w.property_id IN ${orgPropSub} AND w.status NOT IN ('completed', 'cancelled')
        ORDER BY CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, w.created_at DESC
        LIMIT 6`,
+      [activeOrgId],
     ),
     safeQuery<{ id: number; end_date: string; tenant_first_name: string | null; tenant_last_name: string | null; unit_name: string | null; property_name: string | null }>(
       `SELECT l.id, l.end_date,
@@ -1185,23 +2141,24 @@ app.get("/api/dashboard/summary", async (c) => {
          u.name as unit_name, p.name as property_name
        FROM leases l
        LEFT JOIN tenants t ON t.id = l.primary_tenant_id
-       LEFT JOIN units u ON u.id = l.unit_id
-       LEFT JOIN properties p ON p.id = u.property_id
-       WHERE l.status = 'active' AND l.end_date <= date('now', '+60 days')
+       JOIN units u ON u.id = l.unit_id
+       JOIN properties p ON p.id = u.property_id
+       WHERE ${orgPropFilter} AND l.status = 'active' AND l.end_date <= date('now', '+60 days')
        ORDER BY l.end_date ASC LIMIT 6`,
+      [activeOrgId],
     ),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE type = 'airbnb'", [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*) as n FROM units u JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND u.type = 'airbnb'`, [activeOrgId], { n: 0 }),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM airbnb_bookings WHERE booking_status = 'checked_in' OR (booking_status = 'confirmed' AND check_in_date <= date('now') AND check_out_date >= date('now'))",
-      [], { n: 0 },
+      `SELECT COUNT(*) as n FROM airbnb_bookings b JOIN units u ON b.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND (b.booking_status = 'checked_in' OR (b.booking_status = 'confirmed' AND b.check_in_date <= date('now') AND b.check_out_date >= date('now')))`,
+      [activeOrgId], { n: 0 },
     ),
     safeGet<{ total: number }>(
-      "SELECT COALESCE(SUM(net_payout), 0) as total FROM airbnb_bookings WHERE (payout_date LIKE ? OR check_in_date LIKE ?) AND booking_status != 'cancelled'",
-      [periodNow + "%", periodNow + "%"], { total: 0 },
+      `SELECT COALESCE(SUM(b.net_payout), 0) as total FROM airbnb_bookings b JOIN units u ON b.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND (b.payout_date LIKE ? OR b.check_in_date LIKE ?) AND b.booking_status != 'cancelled'`,
+      [activeOrgId, periodNow + "%", periodNow + "%"], { total: 0 },
     ),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM airbnb_bookings WHERE check_in_date >= date('now') AND check_in_date <= date('now', '+7 days') AND booking_status != 'cancelled'",
-      [], { n: 0 },
+      `SELECT COUNT(*) as n FROM airbnb_bookings b JOIN units u ON b.unit_id = u.id JOIN properties p ON u.property_id = p.id WHERE ${orgPropFilter} AND b.check_in_date >= date('now') AND b.check_in_date <= date('now', '+7 days') AND b.booking_status != 'cancelled'`,
+      [activeOrgId], { n: 0 },
     ),
   ]);
 
@@ -1270,6 +2227,15 @@ const DEMO_VENDOR_NAMES = [
 ];
 
 app.get("/api/demo-data/status", async (c) => {
+  const allowed = await getUserAllowedOrgIds(c);
+  if (allowed.length === 0) {
+    return c.json({
+      hasDemoData: false,
+      counts: { properties: 0, units: 0, bookings: 0, vendors: 0, workOrders: 0 },
+      demoProperties: [],
+    });
+  }
+
   const pPlaceholders = DEMO_PROPERTY_NAMES.map(() => "?").join(",");
   const demoProps = await query<{ id: number; name: string }>(
     `SELECT id, name FROM properties WHERE name IN (${pPlaceholders})`,
@@ -1344,6 +2310,9 @@ app.get("/api/demo-data/status", async (c) => {
 });
 
 app.post("/api/demo-data/delete", async (c) => {
+  const allowed = await getUserAllowedOrgIds(c);
+  if (allowed.length === 0) return c.json({ error: "Forbidden: You are not a member of any organization" }, 403);
+
   const pPlaceholders = DEMO_PROPERTY_NAMES.map(() => "?").join(",");
   const demoProps = await query<{ id: number; name: string }>(
     `SELECT id, name FROM properties WHERE name IN (${pPlaceholders})`,
@@ -1474,6 +2443,9 @@ app.post("/api/demo-data/delete", async (c) => {
 });
 
 app.post("/api/demo-data/restore", async (c) => {
+  const allowed = await getUserAllowedOrgIds(c);
+  if (allowed.length === 0) return c.json({ error: "Forbidden: You are not a member of any organization" }, 403);
+
   await run(`
     INSERT INTO settings (key, value, updated_at) VALUES ('sample_data_cleared', 'false', datetime('now'))
     ON CONFLICT(key) DO UPDATE SET value = 'false', updated_at = datetime('now')
@@ -1560,13 +2532,16 @@ const OperatingCostInput = z.object({
 });
 
 app.get("/api/operating-costs", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ operating_costs: [] });
+
   const propertyId = intParam(c.req.query("property_id"));
   const year = intParam(c.req.query("year"));
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (propertyId) { where.push("property_id = ?"); params.push(propertyId); }
-  if (year) { where.push("year = ?"); params.push(year); }
-  const sql = `SELECT * FROM operating_costs ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY year DESC, cost_type ASC`;
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
+  if (propertyId) { where.push("oc.property_id = ?"); params.push(propertyId); }
+  if (year) { where.push("oc.year = ?"); params.push(year); }
+  const sql = `SELECT oc.* FROM operating_costs oc JOIN properties p ON p.id = oc.property_id WHERE ${where.join(" AND ")} ORDER BY oc.year DESC, oc.cost_type ASC`;
   const rows = await query(sql, params).catch(() => []);
   return c.json({ operating_costs: rows });
 });
@@ -1575,6 +2550,14 @@ app.post("/api/operating-costs", async (c) => {
   const parsed = await parseJson(c, OperatingCostInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [d.property_id]);
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot create operating costs" }, 403);
+
   const result = await run(
     `INSERT INTO operating_costs (property_id, year, cost_type, amount, is_commercial_only, notes) VALUES (?, ?, ?, ?, ?, ?)`,
     [d.property_id, d.year, d.cost_type, d.amount, d.is_commercial_only ? 1 : 0, d.notes ?? null],
@@ -1586,6 +2569,17 @@ app.post("/api/operating-costs", async (c) => {
 app.delete("/api/operating-costs/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+
+  const existing = await get<{ property_id: number; organization_id: number }>(
+    "SELECT oc.property_id, p.organization_id FROM operating_costs oc JOIN properties p ON p.id = oc.property_id WHERE oc.id = ?",
+    [id],
+  );
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(existing.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, existing.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot delete operating costs" }, 403);
+
   const r = await run("DELETE FROM operating_costs WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -1601,6 +2595,14 @@ app.post("/api/operating-costs/batch", async (c) => {
   if (!body.property_id || !body.year || !Array.isArray(body.costs)) {
     return c.json({ error: "Invalid payload" }, 400);
   }
+
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [body.property_id]);
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot create operating costs" }, 403);
+
   let added = 0;
   for (const item of body.costs) {
     if (!item.cost_type || typeof item.amount !== "number" || item.amount <= 0) continue;
@@ -1619,11 +2621,13 @@ app.get("/api/properties/:id/operating-costs-summary", async (c) => {
   const year = intParam(c.req.query("year")) || new Date().getFullYear();
   if (!propertyId) return c.json({ error: "Invalid property ID" }, 400);
 
-  const property = await get<{ id: number; name: string; type: string }>(
-    "SELECT id, name, type FROM properties WHERE id = ?",
+  const property = await get<{ id: number; name: string; type: string; organization_id: number }>(
+    "SELECT id, name, type, organization_id FROM properties WHERE id = ?",
     [propertyId],
   );
   if (!property) return c.json({ error: "Property not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(property.organization_id)) return c.json({ error: "Property not found" }, 404);
 
   // 1. Costs for this property and year
   const costs = await query<{ id: number; property_id: number; year: number; cost_type: string; amount: number; is_commercial_only: number; notes: string | null; created_at: string }>(
@@ -1795,6 +2799,13 @@ app.post("/api/nebenkosten-statements/generate", async (c) => {
   if (!body.property_id || !body.year) return c.json({ error: "property_id and year required" }, 400);
   const { property_id, year } = body;
 
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [property_id]);
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot generate statements" }, 403);
+
   // 1. Get all costs
   const costs = await query<{ amount: number; is_commercial_only: number }>(
     "SELECT amount, is_commercial_only FROM operating_costs WHERE property_id = ? AND year = ?",
@@ -1872,7 +2883,20 @@ app.post("/api/nebenkosten-statements/generate", async (c) => {
 
 app.get("/api/nebenkosten-statements", async (c) => {
   const leaseId = intParam(c.req.query("lease_id"));
-  const rows = await query("SELECT * FROM nebenkosten_statements " + (leaseId ? "WHERE lease_id = ?" : ""), leaseId ? [leaseId] : []);
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ statements: [] });
+
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
+  if (leaseId) { where.push("s.lease_id = ?"); params.push(leaseId); }
+  const rows = await query(
+    `SELECT s.* FROM nebenkosten_statements s
+     JOIN leases l ON l.id = s.lease_id
+     JOIN units u ON u.id = l.unit_id
+     JOIN properties p ON p.id = u.property_id
+     WHERE ${where.join(" AND ")}`,
+    params,
+  ).catch(() => []);
   return c.json({ statements: rows });
 });
 
@@ -1922,14 +2946,17 @@ const AIRBNB_BOOKING_SELECT = `
 `;
 
 app.get("/api/airbnb/bookings", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) return c.json({ bookings: [] });
+
   const unitId = intParam(c.req.query("unit_id"));
   const propertyId = intParam(c.req.query("property_id"));
   const status = c.req.query("status");
   const payoutStatus = c.req.query("payout_status");
   const q = c.req.query("q")?.trim().toLowerCase();
 
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const where: string[] = ["p.organization_id = ?"];
+  const params: unknown[] = [activeOrgId];
   if (unitId) { where.push("b.unit_id = ?"); params.push(unitId); }
   if (propertyId) { where.push("u.property_id = ?"); params.push(propertyId); }
   if (status) { where.push("b.booking_status = ?"); params.push(status); }
@@ -1939,7 +2966,7 @@ app.get("/api/airbnb/bookings", async (c) => {
     params.push(`%${q}%`, `%${q}%`, `%${q}%`);
   }
 
-  const sql = `${AIRBNB_BOOKING_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY b.check_in_date DESC`;
+  const sql = `${AIRBNB_BOOKING_SELECT} WHERE ${where.join(" AND ")} ORDER BY b.check_in_date DESC`;
   const rows = await query(sql, params).catch(() => []);
   return c.json({ bookings: rows });
 });
@@ -1947,8 +2974,11 @@ app.get("/api/airbnb/bookings", async (c) => {
 app.get("/api/airbnb/bookings/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get(`${AIRBNB_BOOKING_SELECT} WHERE b.id = ?`, [id]);
+  const row = await get<any>(`${AIRBNB_BOOKING_SELECT} WHERE b.id = ?`, [id]);
   if (!row) return c.json({ error: "Not found" }, 404);
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [row.property_id]);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
   return c.json({ booking: row });
 });
 
@@ -1957,17 +2987,25 @@ app.post("/api/airbnb/bookings", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
 
+  // Get unit defaults if needed
+  const unit = await get<{ airbnb_nightly_rate: number; airbnb_cleaning_fee: number; market_rent: number; property_id: number }>(
+    "SELECT airbnb_nightly_rate, airbnb_cleaning_fee, market_rent, property_id FROM units WHERE id = ?",
+    [d.unit_id],
+  );
+  if (!unit) return c.json({ error: "Unit not found" }, 404);
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]);
+  if (!prop) return c.json({ error: "Property not found" }, 404);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot create bookings" }, 403);
+
   // Auto calculate nights
   const start = new Date(d.check_in_date).getTime();
   const end = new Date(d.check_out_date).getTime();
   const diffDays = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
   const nights = d.nights ?? diffDays;
 
-  // Get unit defaults if needed
-  const unit = await get<{ airbnb_nightly_rate: number; airbnb_cleaning_fee: number; market_rent: number }>(
-    "SELECT airbnb_nightly_rate, airbnb_cleaning_fee, market_rent FROM units WHERE id = ?",
-    [d.unit_id],
-  );
   const nightlyRate = d.nightly_rate ?? (unit?.airbnb_nightly_rate || unit?.market_rent || 0);
   const cleaningFee = d.cleaning_fee ?? (unit?.airbnb_cleaning_fee || 0);
   const totalNights = d.total_nights_amount ?? (nights * nightlyRate);
@@ -2012,6 +3050,13 @@ app.put("/api/airbnb/bookings/:id", async (c) => {
   const existing = await get<{ unit_id: number; booking_status: string }>("SELECT unit_id, booking_status FROM airbnb_bookings WHERE id = ?", [id]);
   if (!existing) return c.json({ error: "Not found" }, 404);
 
+  const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [existing.unit_id]);
+  const prop = unit ? await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot update bookings" }, 403);
+
   const { sets, params } = buildUpdate(parsed.data);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
@@ -2033,6 +3078,15 @@ app.put("/api/airbnb/bookings/:id", async (c) => {
 app.delete("/api/airbnb/bookings/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const existing = await get<{ unit_id: number }>("SELECT unit_id FROM airbnb_bookings WHERE id = ?", [id]);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  const unit = await get<{ property_id: number }>("SELECT property_id FROM units WHERE id = ?", [existing.unit_id]);
+  const prop = unit ? await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]) : null;
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Not found" }, 404);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot delete bookings" }, 403);
+
   const r = await run("DELETE FROM airbnb_bookings WHERE id = ?", [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
@@ -2052,6 +3106,12 @@ app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
     id: number; property_id: number; name: string; airbnb_cleaning_fee: number; airbnb_lockbox_code: string | null; airbnb_check_out_time: string | null;
   }>("SELECT id, property_id, name, airbnb_cleaning_fee, airbnb_lockbox_code, airbnb_check_out_time FROM units WHERE id = ?", [booking.unit_id]);
   if (!unit) return c.json({ error: "Unit not found" }, 404);
+
+  const prop = await get<{ organization_id: number }>("SELECT organization_id FROM properties WHERE id = ?", [unit.property_id]);
+  const allowed = await getUserAllowedOrgIds(c);
+  if (!prop || !allowed.includes(prop.organization_id)) return c.json({ error: "Forbidden" }, 403);
+  const role = await getUserOrgRole(c, prop.organization_id);
+  if (role === "viewer") return c.json({ error: "Viewers cannot schedule cleanings" }, 403);
 
   // Find a cleaning vendor if available
   const vendor = await get<{ id: number }>("SELECT id FROM vendors WHERE category = 'cleaning' LIMIT 1");
@@ -2084,12 +3144,27 @@ app.post("/api/airbnb/bookings/:id/schedule-cleaning", async (c) => {
 
 // Comprehensive Airbnb Analytics
 app.get("/api/airbnb/analytics", async (c) => {
+  const activeOrgId = await getActiveOrganizationId(c);
+  if (!activeOrgId) {
+    return c.json({
+      total_revenue: 0,
+      total_bookings: 0,
+      active_stays: 0,
+      upcoming_check_ins_7d: 0,
+      upcoming_check_outs_7d: 0,
+      average_daily_rate: 0,
+      occupancy_rate: 0,
+      revenue_by_month: [],
+      units_summary: [],
+    });
+  }
+
   const propertyId = intParam(c.req.query("property_id"));
 
-  const whereUnit: string[] = ["u.type = 'airbnb'"];
-  const whereBooking: string[] = ["b.booking_status != 'cancelled'"];
-  const paramsUnit: unknown[] = [];
-  const paramsBooking: unknown[] = [];
+  const whereUnit: string[] = ["u.type = 'airbnb'", "p.organization_id = ?"];
+  const whereBooking: string[] = ["b.booking_status != 'cancelled'", "p.organization_id = ?"];
+  const paramsUnit: unknown[] = [activeOrgId];
+  const paramsBooking: unknown[] = [activeOrgId];
 
   if (propertyId) {
     whereUnit.push("u.property_id = ?");
@@ -2121,6 +3196,7 @@ app.get("/api/airbnb/analytics", async (c) => {
             b.booking_status, b.payout_status
      FROM airbnb_bookings b
      JOIN units u ON u.id = b.unit_id
+     JOIN properties p ON p.id = u.property_id
      WHERE ${whereBooking.join(" AND ")}
      ORDER BY b.check_in_date DESC`,
     paramsBooking,

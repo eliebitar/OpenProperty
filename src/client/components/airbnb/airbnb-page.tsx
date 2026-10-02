@@ -117,7 +117,7 @@ export function AirbnbPage({ navigate }: { navigate?: (to: string) => void }) {
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyFilter]);
+  }, [propertyFilter, app.activeOrganization?.id]);
 
   // Filtered bookings
   const filteredBookings = useMemo(() => {

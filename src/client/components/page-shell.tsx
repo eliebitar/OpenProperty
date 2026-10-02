@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { OrganizationSwitcher } from "./organization/organization-switcher";
 
 /**
  * The page toolbar and the pane under it.
@@ -37,7 +38,15 @@ export function PageShell({
         ) : (
           <div className="flex-1" />
         )}
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        <div className="flex shrink-0 items-center gap-2.5">
+          <OrganizationSwitcher
+            onNavigateOrganization={() => {
+              window.history.pushState(null, "", "/organization");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+          />
+          {actions}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
         <div className={cn("mx-auto w-full space-y-6 p-6", width)}>{children}</div>

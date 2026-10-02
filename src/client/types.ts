@@ -4,6 +4,7 @@ export type PropertyType = "single_family" | "multi_family" | "condo" | "townhou
 
 export interface Property {
   id: number;
+  organization_id?: number | null;
   name: string;
   type: PropertyType;
   address: string | null;
@@ -410,3 +411,48 @@ export interface DeleteDemoDataResult {
     leases: number;
   };
 }
+
+// ── Organizations & Multi-User Team ───────────────────────────────
+
+export type OrganizationRole = "owner" | "admin" | "manager" | "viewer";
+export type MemberStatus = "active" | "invited";
+
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+  created_at: string;
+  updated_at?: string;
+  property_count?: number;
+  member_count?: number;
+  user_role?: OrganizationRole;
+  user_status?: MemberStatus;
+  is_active?: boolean;
+}
+
+export interface OrganizationMember {
+  id: number;
+  organization_id: number;
+  user_id: string | null;
+  email: string;
+  name: string;
+  role: OrganizationRole;
+  status: MemberStatus;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NewOrganization {
+  name: string;
+  description?: string;
+  slug?: string;
+}
+
+export interface InviteMemberInput {
+  email: string;
+  name: string;
+  role: OrganizationRole;
+  status?: MemberStatus;
+}
+

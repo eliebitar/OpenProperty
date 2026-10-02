@@ -8,9 +8,36 @@ CREATE TABLE IF NOT EXISTS settings (
 -- Defaults live in the app (DEFAULT_SETTINGS in src/server/index.ts): a
 -- deploy applies DDL only, so a seed row here fails the whole build.
 
+-- ── Organizations (multi-user tenant boundary) ─────────────────────
+CREATE TABLE IF NOT EXISTS organizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS organization_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'manager',        -- 'owner' | 'admin' | 'manager' | 'viewer'
+  status TEXT NOT NULL DEFAULT 'active',       -- 'active' | 'invited'
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(organization_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_email ON organization_members(email);
+
 -- ── Properties (buildings) ───────────────────────────────────────
 CREATE TABLE IF NOT EXISTS properties (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'single_family',  -- 'single_family' | 'multi_family' | 'condo' | 'townhouse' | 'commercial' | 'airbnb'
   address TEXT,
@@ -22,6 +49,8 @@ CREATE TABLE IF NOT EXISTS properties (
   color TEXT NOT NULL DEFAULT 'sky',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_properties_org ON properties(organization_id);
 
 -- ── Units (rentable spaces inside a property) ────────────────────
 CREATE TABLE IF NOT EXISTS units (
@@ -57,6 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_units_status ON units(status);
 -- ── Tenants ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tenants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
   email TEXT,
@@ -69,6 +99,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE INDEX IF NOT EXISTS idx_tenants_org ON tenants(organization_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_name ON tenants(last_name, first_name);
 
 -- ── Leases ───────────────────────────────────────────────────────

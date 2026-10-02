@@ -11,6 +11,7 @@ export type Route =
   | { name: "rent" }
   | { name: "airbnb" }
   | { name: "maintenance" }
+  | { name: "organization" }
   | { name: "settings" }
   | { name: "not-found" };
 
@@ -30,6 +31,7 @@ function parse(path: string): Route {
   if (path === "/rent") return { name: "rent" };
   if (path === "/airbnb") return { name: "airbnb" };
   if (path === "/maintenance") return { name: "maintenance" };
+  if (path === "/organization") return { name: "organization" };
   if (path === "/settings") return { name: "settings" };
   return { name: "not-found" };
 }

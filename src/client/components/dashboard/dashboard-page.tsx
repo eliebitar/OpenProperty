@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/card";
 import { PageShell } from "@/components/page-shell";
 
 export function DashboardPage({ navigate }: { navigate: (to: string) => void }) {
-  const { settings, setError } = useApp();
+  const { settings, setError, activeOrganization, organizations } = useApp();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -36,7 +36,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       }
     })();
     return () => { cancelled = true; };
-  }, [setError]);
+  }, [setError, activeOrganization?.id]);
 
   if (loading || !summary) {
     return (
@@ -49,8 +49,19 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
   return (
     <PageShell
       title="Dashboard"
-      meta={`Snapshot of ${new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}`}
+      meta={activeOrganization ? `${activeOrganization.name} · Snapshot of ${new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}` : `Snapshot of ${new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}`}
     >
+      {organizations.length === 0 && (
+        <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm flex items-start gap-3 text-amber-900 dark:text-amber-200">
+          <CircleAlert className="size-5 shrink-0 text-amber-500 mt-0.5" />
+          <div>
+            <h3 className="font-semibold">No Organization Membership</h3>
+            <p className="mt-1 text-xs leading-relaxed text-amber-800/90 dark:text-amber-300/90">
+              You are currently logged in but not listed as a member in any organization. Your properties and financial portfolio are isolated to organizations you belong to. Ask an existing organization owner to add your email, or create your own organization in the top navigation.
+            </p>
+          </div>
+        </div>
+      )}
 
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard

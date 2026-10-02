@@ -108,18 +108,33 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
           </Button>
         </div>
       )}
-      {properties.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
-            <Building2 className="size-8 text-faint" aria-hidden />
-            <p className="font-medium">No properties yet</p>
-            <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Add your first property to start managing units, leases, and rent.
-            </p>
-            <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4" /> New property
-            </Button>
+      {app.organizations.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 px-6 py-20 text-center max-w-md mx-auto">
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <Building2 className="size-7" />
           </div>
-        ) : (
+          <h2 className="text-lg font-semibold tracking-tight">No Organization Membership</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            You are not listed in any organization. In OpenProperty, properties and units are strictly protected and isolated by organization.
+          </p>
+          <div className="text-xs text-muted-foreground bg-muted/60 p-3 rounded-lg border text-left space-y-1.5 w-full">
+            <p className="font-semibold text-foreground">How to access properties:</p>
+            <p>1. Ask the owner of an existing organization to invite your email address.</p>
+            <p>2. Or create your own organization using the organization switcher at the top.</p>
+          </div>
+        </div>
+      ) : properties.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
+          <Building2 className="size-8 text-faint" aria-hidden />
+          <p className="font-medium">No properties yet</p>
+          <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+            Add your first property to start managing units, leases, and rent.
+          </p>
+          <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
+            <Plus className="h-4 w-4" /> New property
+          </Button>
+        </div>
+      ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {properties.map((p) => {
               const palette = colorClasses(p.color);

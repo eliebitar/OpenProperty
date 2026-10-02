@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, getActiveOrganizationId, setActiveOrganizationId, getSimulatedUser, setSimulatedUser } from "../api";
 import type {
   Property,
   Unit,
@@ -19,6 +19,10 @@ import type {
   AirbnbAnalytics,
   DemoDataStatus,
   DeleteDemoDataResult,
+  Organization,
+  OrganizationMember,
+  NewOrganization,
+  InviteMemberInput,
 } from "../types";
 
 export interface AppSettings {
@@ -52,21 +56,60 @@ export function useAppState() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
+  const [organizationMembers, setOrganizationMembers] = useState<OrganizationMember[]>([]);
+  const [simulatedUser, setSimulatedUserState] = useState<string | null>(getSimulatedUser());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Lookup loaders ─────────────────────────────────────────────────
 
+  const refreshOrganizations = useCallback(async (): Promise<Organization[]> => {
+    try {
+      const res = await api<{ organizations: Organization[]; active_organization_id: number | null }>(
+        "GET",
+        "/api/organizations"
+      );
+      const orgs = res.organizations || [];
+      setOrganizations(orgs);
+      const currentActiveId = getActiveOrganizationId() || res.active_organization_id;
+      const current = orgs.find((o) => o.id === currentActiveId) || orgs[0] || null;
+      if (current) {
+        setActiveOrganization(current);
+        setActiveOrganizationId(current.id);
+        const memRes = await api<{ members: OrganizationMember[] }>(
+          "GET",
+          `/api/organizations/${current.id}/members`
+        ).catch(() => ({ members: [] }));
+        setOrganizationMembers(memRes.members || []);
+      } else {
+        setActiveOrganization(null);
+        setActiveOrganizationId(null);
+        setOrganizationMembers([]);
+      }
+      return orgs;
+    } catch (err) {
+      console.warn("Failed to load organizations:", err);
+      setOrganizations([]);
+      setActiveOrganization(null);
+      setActiveOrganizationId(null);
+      setOrganizationMembers([]);
+      return [];
+    }
+  }, []);
+
   const refreshLookups = useCallback(async () => {
+    await refreshOrganizations();
     const [props, vens, st] = await Promise.all([
-      api<{ properties: Property[] }>("GET", "/api/properties"),
+      api<{ properties: Property[] }>("GET", "/api/properties").catch(() => ({ properties: [] })),
       api<{ vendors: Vendor[] }>("GET", "/api/vendors").catch(() => ({ vendors: [] })),
       api<{ settings: Record<string, string> }>("GET", "/api/settings").catch(() => ({ settings: {} })),
     ]);
-    setProperties(props.properties);
-    setVendors(vens.vendors);
-    setSettings(parseSettings(st.settings));
-  }, []);
+    setProperties(props.properties || []);
+    setVendors(vens.vendors || []);
+    setSettings(parseSettings(st.settings || {}));
+  }, [refreshOrganizations]);
 
   const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
     const body: Record<string, string> = {};
@@ -324,14 +367,117 @@ export function useAppState() {
     return res;
   }, [refreshLookups]);
 
+  // Organization mutations ──────────────────────────────────────────
+
+  const switchOrganization = useCallback(async (orgId: number) => {
+    setActiveOrganizationId(orgId);
+    const target = organizations.find((o) => o.id === orgId);
+    if (target) {
+      setActiveOrganization(target);
+    }
+    try {
+      const memRes = await api<{ members: OrganizationMember[] }>(
+        "GET",
+        `/api/organizations/${orgId}/members`
+      );
+      setOrganizationMembers(memRes.members);
+    } catch {
+      /* ignore */
+    }
+    await refreshLookups();
+  }, [organizations, refreshLookups]);
+
+  const createOrganization = useCallback(async (data: NewOrganization): Promise<Organization> => {
+    const res = await api<{ organization: Organization }>("POST", "/api/organizations", data);
+    setActiveOrganizationId(res.organization.id);
+    await refreshLookups();
+    return res.organization;
+  }, [refreshLookups]);
+
+  const updateOrganization = useCallback(async (id: number, patch: Partial<NewOrganization>): Promise<Organization> => {
+    const res = await api<{ organization: Organization }>("PUT", `/api/organizations/${id}`, patch);
+    await refreshLookups();
+    return res.organization;
+  }, [refreshLookups]);
+
+  const deleteOrganization = useCallback(async (id: number): Promise<void> => {
+    await api("DELETE", `/api/organizations/${id}`);
+    const remaining = organizations.filter((o) => o.id !== id);
+    if (remaining.length > 0) {
+      setActiveOrganizationId(remaining[0].id);
+    }
+    await refreshLookups();
+  }, [organizations, refreshLookups]);
+
+  const listOrganizationMembers = useCallback(async (orgId?: number): Promise<OrganizationMember[]> => {
+    const targetId = orgId || activeOrganization?.id;
+    if (!targetId) return [];
+    try {
+      const res = await api<{ members: OrganizationMember[] }>("GET", `/api/organizations/${targetId}/members`);
+      if (targetId === activeOrganization?.id) {
+        setOrganizationMembers(res.members || []);
+      }
+      return res.members || [];
+    } catch {
+      return [];
+    }
+  }, [activeOrganization?.id]);
+
+  const inviteOrganizationMember = useCallback(async (data: InviteMemberInput, orgId?: number): Promise<OrganizationMember> => {
+    const targetId = orgId || activeOrganization?.id;
+    if (!targetId) throw new Error("No active organization");
+    const res = await api<{ member: OrganizationMember }>("POST", `/api/organizations/${targetId}/members`, data);
+    await listOrganizationMembers(targetId);
+    await refreshOrganizations();
+    return res.member;
+  }, [activeOrganization?.id, listOrganizationMembers, refreshOrganizations]);
+
+  const updateOrganizationMember = useCallback(async (
+    memberId: number,
+    patch: Partial<OrganizationMember>,
+    orgId?: number
+  ): Promise<OrganizationMember> => {
+    const targetId = orgId || activeOrganization?.id;
+    if (!targetId) throw new Error("No active organization");
+    const res = await api<{ member: OrganizationMember }>(
+      "PUT",
+      `/api/organizations/${targetId}/members/${memberId}`,
+      patch
+    );
+    await listOrganizationMembers(targetId);
+    return res.member;
+  }, [activeOrganization?.id, listOrganizationMembers]);
+
+  const removeOrganizationMember = useCallback(async (memberId: number, orgId?: number): Promise<void> => {
+    const targetId = orgId || activeOrganization?.id;
+    if (!targetId) throw new Error("No active organization");
+    await api("DELETE", `/api/organizations/${targetId}/members/${memberId}`);
+    await listOrganizationMembers(targetId);
+    await refreshOrganizations();
+  }, [activeOrganization?.id, listOrganizationMembers, refreshOrganizations]);
+
+  const switchSimulatedUser = useCallback(async (email: string | null) => {
+    setSimulatedUser(email);
+    setSimulatedUserState(email);
+    setActiveOrganizationId(null);
+    setActiveOrganization(null);
+    await refreshLookups();
+  }, [refreshLookups]);
+
   return {
     // data
     properties, vendors, settings,
+    organizations, activeOrganization, organizationMembers, simulatedUser,
     loading, error, setError,
     // refresh
     refreshLookups,
+    refreshOrganizations,
     // settings
     updateSettings,
+    // organizations
+    switchOrganization, createOrganization, updateOrganization, deleteOrganization,
+    listOrganizationMembers, inviteOrganizationMember, updateOrganizationMember, removeOrganizationMember,
+    switchSimulatedUser,
     // properties / units
     createProperty, updateProperty, deleteProperty,
     listUnits, getUnit, createUnit, updateUnit, deleteUnit,

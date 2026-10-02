@@ -114,6 +114,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (authenticated && kc.token) {
         setToken(kc.token);
         setUser(extractUserFromKeycloak(kc));
+        try {
+          localStorage.removeItem("openproperty:simulated_user");
+        } catch {
+          /* ignore */
+        }
       } else {
         setUser(null);
         setToken(null);

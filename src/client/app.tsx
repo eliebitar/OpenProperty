@@ -18,6 +18,7 @@ import { RentPage } from "./components/rent/rent-page";
 import { AirbnbPage } from "./components/airbnb/airbnb-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
+import { OrganizationPage } from "./components/organization/organization-page";
 
 /**
  * The navigation, defined once.
@@ -44,6 +45,7 @@ const OPERATIONS: AppNavItem[] = [
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
 ];
 const ADMIN: AppNavItem[] = [
+  { id: "organization", label: "Organization", href: "/organization", icon: "shield", color: "violet" },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 
@@ -113,6 +115,7 @@ function AppContent() {
               {route.name === "rent" && <RentPage navigate={navigate} />}
               {route.name === "airbnb" && <AirbnbPage navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
+              {route.name === "organization" && <OrganizationPage navigate={navigate} />}
               {route.name === "settings" && <SettingsPage />}
               {route.name === "not-found" && (
                 <Placeholder title="Not found" message="That page doesn't exist." />
